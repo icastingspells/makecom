@@ -2,6 +2,7 @@ services:
   - type: web
     name: makecom
     runtime: node
+    plan: free
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start -w server
     healthCheckPath: /health

@@ -247,3 +247,9 @@ Historical references to removed documentation paths in older entries are preser
 - README now contains project features, usage, architecture, data schema and deployment instructions; removed development stages, readiness report and GitHub preparation history.
 - Documentation-only change; verified README links and diff. Previous code verification: 63 tests, typecheck and build passed.
 - Promotion uses fast-forward to preserve every commit; no deployment requested.
+
+
+## 2026-10-26 | HOSTING | Free Render compute
+- User requested the free Render option. Explicitly set plan: free in render.yaml, verified against the official Blueprint specification.
+- Supabase remains the persistent storage; no Render disk or database added. No cloud resource created.
+- Configuration-only change; diff checked, application tests unchanged.
