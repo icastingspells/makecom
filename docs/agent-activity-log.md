@@ -230,3 +230,5 @@ Historical references to removed documentation paths in older entries are preser
 - User supplied https://github.com/icastingspells/makecom.git and requested keeping changes in dev, without publishing main.
 - Configured origin; verified old dev was an ancestor of main, advanced dev to the existing checkpoint and switched to dev with all working changes preserved.
 - Main remains at f72989e. Full sanitized history retained; documentation now targets dev publication.
+
+- Publication completed: commit 394671b pushed successfully to origin/dev, upstream configured. No main push; no deployment.
