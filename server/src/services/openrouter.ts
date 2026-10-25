@@ -1,3 +1,4 @@
+import { logEvent } from '../logging.js';
 import type { GenerationContext, GenerationOperation } from './operations.js';
 import { getEnv } from '../config/env.js';
 import { openRouterFetch } from '../http-proxy.js';
@@ -72,7 +73,7 @@ export class OpenRouterService {
       this.cacheTime = now;
       return this.modelsCache;
     } catch (err) {
-      console.error('[openrouter] getModels failed:', err);
+      logEvent('provider.models_failed', {}, 'warn');
       // Фоллбек - минимальный список
       if (this.modelsCache.length > 0) return this.modelsCache;
       return [
@@ -138,6 +139,7 @@ export class OpenRouterService {
         const res = await openRouterFetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST', headers, body: JSON.stringify({ ...req, provider }), signal: AbortSignal.timeout(timeoutMs)
         });
+        logEvent('provider.response', { status: res.status, attempt }, res.ok ? 'info' : 'warn');
         if (!res.ok) {
           entry.status = res.status >= 400 && res.status < 500 ? 'rejected' : 'unknown';
           const retryAfter = res.headers.get('retry-after');

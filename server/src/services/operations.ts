@@ -1,3 +1,4 @@
+import { logEvent } from '../logging.js';
 import { randomUUID } from 'crypto';
 import { createStorage } from '../storage/index.js';
 import type { IStorage } from '../storage/types.js';
@@ -41,9 +42,11 @@ export class OperationJournal {
       const now = new Date().toISOString();
       const operation: GenerationOperation = { id, kind, model, status: 'running', stage: 'preflight', createdAt: now, updatedAt: now, limitUsd, freeOnly, mock: false, attempts: [] };
       await this.storage.saveOperation(operation);
+      logEvent('generation.started', { operationId: id, kind });
       const update = async (patch: Parameters<GenerationContext['update']>[0]) => {
         Object.assign(operation, patch, { updatedAt: new Date().toISOString() });
         await this.storage.saveOperation(operation);
+        logEvent('generation.updated', { operationId: id, kind, stage: operation.stage, attempt: operation.attempts.length });
       };
       return {
         operation,
@@ -55,7 +58,13 @@ export class OperationJournal {
           operation.updatedAt = operation.finishedAt;
           delete operation.retryAt;
           if (resultId) operation.resultId = resultId;
-          try { await this.storage.saveOperation(operation); } finally { this.active.delete(id); }
+          try {
+            await this.storage.saveOperation(operation);
+            logEvent('generation.finished', { operationId: id, kind, stage: operation.stage, succeeded, attempt: operation.attempts.length, durationMs: Date.now() - Date.parse(operation.createdAt) }, succeeded ? 'info' : 'error');
+          } catch (error) {
+            logEvent('generation.journal_failed', { operationId: id, kind }, 'error');
+            throw error;
+          } finally { this.active.delete(id); }
         }
       };
     } catch (error) { this.active.delete(id); throw error; }

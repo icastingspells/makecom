@@ -232,3 +232,11 @@ Historical references to removed documentation paths in older entries are preser
 - Main remains at f72989e. Full sanitized history retained; documentation now targets dev publication.
 
 - Publication completed: commit 394671b pushed successfully to origin/dev, upstream configured. No main push; no deployment.
+
+
+## 2026-10-26 | OBSERVABILITY | Safe logging and final scope audit
+- Added structured metadata-only logs for HTTP completion/abort, server lifecycle, operation stages/retries/outcomes, provider status and journal failures. Removed raw provider error logging; added safe Express error handling.
+- Added regression tests for metadata allowlist and request privacy (path/query/authorization/cookies/body).
+- Audited scope sections 1-7, updated checklist and README with compact readiness table. Original scope already tracked in origin/dev and remains unchanged.
+- Remaining: two packaged verified example sets, independent complete live-content review and real Render/Supabase verification. No paid generations/deployment.
+- Final verification: 63 tests in 16 files, both workspace typechecks, production build and diff whitespace check passed. Original scope SHA-256 unchanged.

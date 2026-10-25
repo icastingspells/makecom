@@ -1,3 +1,4 @@
+import { logEvent } from '../logging.js';
 import { beginOperation } from './operations.js';
 import { Router } from 'express';
 import { CompanyCoreService } from '../core/company-core.js';
@@ -132,11 +133,11 @@ router.post('/create', async (req, res) => {
 
     res.json({ core, snapshotHash: snapshot?.hash, costUsd: result.costUsd });
   } catch (err: any) {
-    if (tracking) { await tracking.finish(false, resultId).catch(() => console.error('[operations] Failed to save final status')); tracking = undefined; }
+    if (tracking) { await tracking.finish(false, resultId).catch(() => logEvent('generation.journal_failed', {}, 'error')); tracking = undefined; }
     if (err instanceof MissingSessionError) return res.status(401).json({ error: err.message });
     res.status(500).json({ error: err.message });
   } finally {
-    if (tracking) await tracking.finish(false, resultId).catch(() => console.error('[operations] Failed to persist final operation status'));
+    if (tracking) await tracking.finish(false, resultId).catch(() => logEvent('generation.journal_failed', {}, 'error'));
   }
 });
 

@@ -1,4 +1,5 @@
-import express from 'express';
+import express, { type ErrorRequestHandler } from 'express';
+import { requestLogging } from './logging.js';
 import { timingSafeEqual } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -16,6 +17,7 @@ export function createApp() {
 
   const app = express();
   app.set('trust proxy', 1);
+  app.use(requestLogging);
   app.use(express.json({ limit: '512kb' }));
   app.use((req, res, next) => {
     if (req.path === '/health' || !env.APP_ACCESS_PASSWORD) return next();
@@ -38,6 +40,14 @@ export function createApp() {
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(express.static(fileURLToPath(new URL('../../client/dist', import.meta.url))));
   app.get('/', (_req, res) => res.sendFile(path.resolve(fileURLToPath(new URL('../../client/dist/index.html', import.meta.url)))));
+
+  // Do not let Express's default error handler print request-derived error bodies.
+  const safeErrorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+    if (res.headersSent) { res.destroy(); return; }
+    const status = error?.status === 400 ? 400 : error?.status === 413 ? 413 : 500;
+    res.status(status).json({ error: status === 400 ? 'Invalid request' : status === 413 ? 'Request too large' : 'Internal server error', requestId: res.locals.requestId });
+  };
+  app.use(safeErrorHandler);
 
   return app;
 }
