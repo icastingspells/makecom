@@ -3,10 +3,42 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Makecom - Company & Site Generator</title>
+    <title>Makecom — Генератор компании и сайта</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app"></div>
+    <header>
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-mark"></span>
+          <div>
+            <span class="logo-text">Makecom</span>
+            <span class="logo-sub">Генератор карточки компании и сайта</span>
+          </div>
+        </div>
+        <div class="status" id="global-status">Готово к работе</div>
+      </div>
+    </header>
+    <main>
+      <nav class="tabs">
+        <button class="tab active" data-tab="company">
+          <span>Этап А</span>
+          <span>Карточка компании</span>
+        </button>
+        <button class="tab" data-tab="site">
+          <span>Этап Б</span>
+          <span>Генерация сайта</span>
+        </button>
+        <button class="tab" data-tab="library">
+          <span>Библиотека</span>
+          <span>Сохранённые компании</span>
+        </button>
+      </nav>
+      <div id="app"></div>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
