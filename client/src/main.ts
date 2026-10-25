@@ -41,8 +41,11 @@ function renderCompany() {
       <article class="panel">
         <header class="panel-header">
           <div class="panel-title-group">
-            <h2>Этап А — Генерация карточки компании</h2>
-            <p>Создаём подробную уникальную CompanyCore с живыми текстами</p>
+            <h2>Этап А — Карточка компании</h2>
+            <p>Генерация, просмотр и редактирование CompanyCore</p>
+          </div>
+          <div class="actions" style="padding: 0;">
+            <button class="btn" id="goToSite"><span>Перейти к генерации сайта</span></button>
           </div>
         </header>
         <div class="panel-body">
@@ -211,6 +214,22 @@ function renderCompany() {
   loadModels();
   setupCompany();
   setupCoreEditor();
+  const goToSite = document.getElementById('goToSite') as HTMLButtonElement;
+  goToSite?.addEventListener('click', () => {
+    tabs.forEach((t) => {
+      t.classList.toggle('active', (t as HTMLElement).dataset.tab === 'site');
+    });
+    render('site');
+    setTimeout(() => {
+      if (selectedCoreId) {
+        const coreIdInput = document.getElementById('coreId') as HTMLInputElement;
+        const select = document.getElementById('siteCoreSelect') as HTMLSelectElement;
+        if (coreIdInput) coreIdInput.value = selectedCoreId;
+        if (select) select.value = selectedCoreId;
+      }
+      setGlobalStatus('Переход к генерации сайта с выбранной карточкой', 'info');
+    }, 50);
+  });
 }
 
 function setupCompany() {
@@ -699,12 +718,22 @@ function renderLibrary() {
           currentCoreData = data.core;
         }
       } catch {}
-      renderLibrary();
-      setGlobalStatus('Компания выбрана', 'info');
       tabs.forEach((t) => {
-        t.classList.toggle('active', (t as HTMLElement).dataset.tab === 'site');
+        t.classList.toggle('active', (t as HTMLElement).dataset.tab === 'company');
       });
-      render('site');
+      render('company');
+      setTimeout(() => {
+        if (currentCoreData) {
+          fillCoreEditor(currentCoreData);
+        }
+        const editStatus = document.getElementById('core-edit-status') as HTMLElement;
+        if (editStatus) {
+          editStatus.textContent = 'Карточка загружена для просмотра и редактирования';
+          editStatus.classList.remove('error');
+          editStatus.classList.add('success');
+        }
+        setGlobalStatus('Открыта карточка компании для редактирования', 'info');
+      }, 50);
     });
   });
 }
