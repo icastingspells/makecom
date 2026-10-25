@@ -2,14 +2,7 @@ import type { GenerationContext, GenerationOperation } from './operations.js';
 import { getEnv } from '../config/env.js';
 import { openRouterFetch } from '../http-proxy.js';
 
-/**
- * OpenRouter Service
- * - Прокси запросов только с сервера
- * - Кэш моделей
- * - Оценка стоимости
- * - Лимит расходов на операцию
- * - Мок-режим для тестирования без ключа
- */
+/** OpenRouter requests use transient session credentials; model prices are cached for budget checks. */
 
 export interface ModelInfo {
   id: string;

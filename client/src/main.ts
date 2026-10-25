@@ -1,4 +1,11 @@
-import { mountGenerationControls, fetchGeneration, renderOperations, mountQuotaCheck } from './generation-operations';
+import { loadCardVersions } from './views/card-versions';
+import { fillCoreEditor, gatherCoreFromEditor } from './editor-fields';
+import { loadModels } from './model-selector';
+import { renderSettings } from './views/settings-page';
+import { companyMarkup } from './views/company-view';
+import { siteMarkup } from './views/site-view';
+import { libraryMarkup } from './views/library-view';
+import { mountGenerationControls, fetchGeneration, renderOperations } from './generation-operations';
 import { mountCompanyInputs } from './company-inputs';
 import { editorMarkup } from './editor-view';
 import { showSitePreview } from './site-preview';
@@ -8,8 +15,6 @@ import { saveAs } from 'file-saver';
 const app = document.getElementById('app') as HTMLElement;
 const tabs = document.querySelectorAll('.tab');
 const globalStatus = document.getElementById('global-status') as HTMLElement;
-
-const API = '';
 
 let cores: any[] = [];
 let selectedCoreId: string | null = null;
@@ -80,7 +85,7 @@ async function renderRoute() {
   app.textContent = 'Загрузка карточки…';
   try {
     selectedCoreId = decodeURIComponent(match[1]);
-    const res = await fetch(`${API}/api/core/${encodeURIComponent(selectedCoreId)}`);
+    const res = await fetch(`/api/core/${encodeURIComponent(selectedCoreId)}`);
     const data = await res.json();
     if (location.hash.slice(1) !== route) return;
     if (!res.ok) throw new Error(data.error || 'Не удалось загрузить карточку');
@@ -100,115 +105,13 @@ function render(view: string | undefined) {
   if (view === 'company') renderCompany();
   else if (view === 'site') renderSite();
   else if (view === 'library') renderLibrary();
-  else if (view === 'settings') renderSettings();
+  else if (view === 'settings') renderSettings(app, pageHeading);
   else if (view === 'operations') { renderOperations(app); pageHeading('История и расходы', 'Ход генераций, попытки и подтверждённая стоимость.', 'Рабочее пространство'); }
 }
 
-function renderSettings() {
-  app.innerHTML = `<article class="panel"><header class="panel-header"><div class="panel-title-group"><h2>OpenRouter</h2><p>Ваш ключ используется для генерации компаний и сайтов.</p></div></header><div class="panel-body" style="grid-template-columns:1fr"><form id="tokenForm" class="form-grid"><div class="field" style="grid-column:1/-1"><label class="field-label" for="openRouterToken">Ключ API OpenRouter</label><div class="field-control"><input type="password" id="openRouterToken" autocomplete="off" spellcheck="false" placeholder="sk-or-…" required /></div><span class="field-hint">Хранится в зашифрованной HttpOnly cookie текущей сессии. Не записывается в базу, файлы или localStorage. Сервер получает ключ только для выполнения запросов.</span></div><div class="actions"><button class="btn" type="submit">Подключить</button><button class="btn ghost" type="button" id="clearToken">Удалить ключ из сессии</button></div><span class="status" id="tokenStatus" role="status"></span></form></div></article>`;
-  const quota = mountQuotaCheck();
-  pageHeading('Подключение', 'Управляйте ключом для текущей сессии браузера.', 'Настройки');
-  const status = document.getElementById('tokenStatus')!;
-  const input = document.getElementById('openRouterToken') as HTMLInputElement;
-  const form = document.getElementById('tokenForm') as HTMLFormElement;
-  const remove = document.getElementById('clearToken') as HTMLButtonElement;
-  let sessionRevision = 0;
-  void fetch('/api/session').then(r => r.json()).then(data => { if (!status.isConnected || sessionRevision !== 0) return; status.classList.toggle('is-connected', !!data.connected); status.textContent = data.connected ? 'Ключ добавлен в эту сессию. Содержимое ключа не возвращается в браузер.' : data.mock ? 'Включён тестовый режим без платных запросов.' : 'Ключ пока не добавлен.'; if (data.connected) void quota?.refresh(); }).catch(() => { if (sessionRevision !== 0 || !status.isConnected) return; status.classList.remove('is-connected'); status.textContent = 'Не удалось проверить подключение'; });
-  form.addEventListener('submit', async event => {
-    event.preventDefault();
-    sessionRevision++;
-    remove.disabled = true;
-    const button = form.querySelector<HTMLButtonElement>('[type=submit]')!; button.disabled = true;
-    quota?.clear();
-    try {
-      const body = JSON.stringify({ token: input.value.trim() }); input.value = '';
-      const res = await fetch('/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      const data = await res.json(); if (!res.ok) throw new Error(data.error);
-      status.textContent = 'Ключ добавлен в сессию. Можно создавать компании и сайты.';
-      status.classList.add('is-connected');
-      void quota?.refresh();
-    } catch (err: unknown) { status.classList.remove('is-connected'); status.textContent = err instanceof Error ? err.message : 'Не удалось подключить ключ'; }
-    finally { button.disabled = false; remove.disabled = false; }
-  });
-  remove.addEventListener('click', async () => {
-    sessionRevision++;
-    const connect = form.querySelector<HTMLButtonElement>('[type=submit]')!; connect.disabled = true; remove.disabled = true;
-    try { const res = await fetch('/api/session', { method: 'DELETE' }); if (!res.ok) throw new Error(); input.value = ''; status.classList.remove('is-connected'); status.textContent = 'Ключ удалён из сессии.'; quota?.clear(); }
-    catch { status.textContent = 'Не удалось удалить ключ. Повторите попытку.'; }
-    finally { connect.disabled = false; remove.disabled = false; }
-  });
-}
 
 function renderCompany() {
-  app.innerHTML = `
-    <section class="grid">
-      <article class="panel">
-        <header class="panel-header">
-          <div class="panel-title-group">
-            <h2>Параметры компании</h2>
-            <p>Выберите параметры и модель для генерации.</p>
-          </div>
-          <div class="actions" style="padding: 0;">
-            <button class="btn ghost" id="goToSite"><span>Создать сайт →</span></button>
-          </div>
-        </header>
-        <div class="panel-body">
-          <div class="form-grid">
-            <div class="field">
-              <span class="field-label">Страна</span>
-              <div class="field-control">
-                <select id="country"><option value="DE">Германия</option></select>
-              </div>
-            </div>
-            <div class="field">
-              <span class="field-label">Масштаб</span>
-              <div class="field-control">
-                <select id="scale">
-                  <option value="small">Небольшая компания</option>
-                  <option value="medium">Средняя компания</option>
-                </select>
-              </div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Название бренда (опционально)</span>
-              <div class="field-control">
-                <input id="brandName" placeholder="Оставьте пустым для случайного" />
-              </div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Модель OpenRouter</span>
-              <div class="field-control">
-                <input id="modelSearch" type="search" aria-label="Поиск модели OpenRouter" placeholder="Поиск по названию или ID модели" />
-              </div>
-              <div class="field-control">
-                <select id="model" aria-label="Модель OpenRouter"></select>
-              </div>
-              <span id="modelSearchStatus" role="status"></span>
-            </div>
-            <div class="actions">
-              <button class="btn" id="generateCore">
-                <span>Сгенерировать карточку</span>
-              </button>
-              <span class="status" id="core-status">Карточка сохранится в библиотеке</span>
-            </div>
-          </div>
-          <aside class="result">
-            <header class="result-header">
-              <div>
-                <h3>Новая карточка</h3>
-                <span class="result-sub">Здесь появится результат генерации</span>
-              </div>
-            </header>
-            <div class="result-body">
-              <pre class="result-placeholder" id="coreResult">Задайте параметры компании и выберите модель. После генерации вы сможете проверить и отредактировать все тексты.</pre>
-              <button class="btn ghost hidden" id="openGenerated">Открыть карточку →</button>
-            </div>
-          </aside>
-        </div>
-      </article>
-
-    </section>
-  `;
+  app.innerHTML = companyMarkup();
 
   pageHeading('Новая компания', 'Создайте основу для будущего сайта: профиль компании, команду и описание продукта.', '01 / Создание');
   mountCompanyInputs();
@@ -252,7 +155,7 @@ function setupCompany() {
     };
 
     try {
-      const res = await fetchGeneration(`${API}/api/core/create`, body);
+      const res = await fetchGeneration(`/api/core/create`, body);
       const data = await res.json();
       if (res.ok) {
         status.textContent = 'Карточка сгенерирована';
@@ -345,7 +248,7 @@ function setupCardActions() {
     const id = selectedCoreId;
     approve.disabled = true;
     try {
-      const response = await fetch(`${API}/api/core/${encodeURIComponent(id!)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: currentCoreData.meta.version, consistencyReviewed: true }) });
+      const response = await fetch(`/api/core/${encodeURIComponent(id!)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: currentCoreData.meta.version, consistencyReviewed: true }) });
       const data = await response.json();
       if (!response.ok) throw new Error([data.error, ...(data.errors || [])].join('\n'));
       if (selectedCoreId === id && approve.isConnected) {
@@ -361,64 +264,13 @@ function setupCardActions() {
     if (hasUnsavedChanges()) { status.textContent = 'Сохраните изменения перед скачиванием JSON.'; return; }
     const id = selectedCoreId; exportButton.disabled = true;
     try {
-      const response = await fetch(`${API}/api/core/${encodeURIComponent(id!)}/export`);
+      const response = await fetch(`/api/core/${encodeURIComponent(id!)}/export`);
       if (!response.ok) throw new Error('Не удалось скачать карточку');
       saveAs(await response.blob(), `company-${id}.json`);
       status.textContent = 'Сохранённая карточка скачана в JSON.';
     } catch (error) { status.textContent = error instanceof Error ? error.message : 'Не удалось скачать карточку'; }
     finally { exportButton.disabled = false; }
   });
-}
-
-async function loadCardVersions(coreId: string) {
-  const container = document.getElementById('cardVersions')!;
-  container.textContent = 'Загрузка версий сайтов…';
-  try {
-    const res = await fetch(`${API}/api/site/versions/${encodeURIComponent(coreId)}`);
-    if (!res.ok) throw new Error();
-    const data = await res.json();
-    if (!container.isConnected) return;
-    container.replaceChildren();
-    for (const version of data.versions || []) {
-      const row = document.createElement('p');
-      row.className = 'version-row';
-      const info = document.createElement('span');
-      info.textContent = `${version.lang === 'ru' ? 'Русский' : 'Немецкий'} · ${new Date(version.createdAt).toLocaleString('ru-RU')}`;
-      const id = document.createElement('small'); id.textContent = `Версия ${version.id.slice(0, 8)}${version.generation ? ' · ' + (version.generation.kind === 'ai' ? 'AI: ' : 'Тест: ') + version.generation.model : ''}`;
-      info.append(id); row.append(info);
-      const previewContainer = document.createElement('div'); previewContainer.className = 'version-preview hidden';
-      previewContainer.id = `version-preview-${version.id}`;
-      if (version.files) {
-        const preview = document.createElement('button'); preview.className = 'btn ghost'; preview.textContent = 'Открыть превью';
-
-        preview.setAttribute('aria-expanded', 'false'); preview.setAttribute('aria-controls', previewContainer.id);
-        preview.addEventListener('click', () => {
-          if (!previewContainer.classList.contains('hidden')) {
-            previewContainer.replaceChildren(); previewContainer.classList.add('hidden');
-            preview.textContent = 'Открыть превью'; preview.setAttribute('aria-expanded', 'false');
-          } else {
-            showSitePreview(previewContainer, version.files);
-            preview.textContent = 'Скрыть превью'; preview.setAttribute('aria-expanded', 'true');
-            previewContainer.scrollIntoView({ block: 'start' });
-          }
-        });
-        row.append(preview);
-
-        const download = document.createElement('button');
-        download.className = 'btn ghost';
-        download.textContent = 'Скачать ZIP';
-        download.addEventListener('click', async () => {
-          const zip = new JSZip();
-          for (const [name, content] of Object.entries(version.files)) zip.file(name, content as string);
-          saveAs(await zip.generateAsync({ type: 'blob' }), `site_${version.id}.zip`);
-        });
-        row.append(download);
-      } else row.append('Файлы старой версии не были сохранены.');
-      container.append(row);
-      if (version.files) container.append(previewContainer);
-    }
-    if (!data.versions?.length) container.append('Сайтов пока нет. Создайте первый сайт на основе этой карточки.');
-  } catch { container.textContent = 'Не удалось загрузить версии сайтов'; }
 }
 
 function setupCoreEditor() {
@@ -442,7 +294,7 @@ function setupCoreEditor() {
     try {
       saveBtn.disabled = true;
       const core = gatherCoreFromEditor();
-      const res = await fetch(`${API}/api/core/${encodeURIComponent(editingId)}`, {
+      const res = await fetch(`/api/core/${encodeURIComponent(editingId)}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...core, expectedVersion: currentCoreData.meta.version, consistencyReviewed: true })
       });
@@ -463,198 +315,8 @@ function setupCoreEditor() {
   });
 }
 
-function fillCoreEditor(core: any) {
-  for (let i = 0; i < 5; i++) {
-    (document.getElementById(`faq_q_${i}`) as HTMLInputElement).value = core.faq?.[i]?.q || '';
-    (document.getElementById(`faq_a_${i}`) as HTMLTextAreaElement).value = core.faq?.[i]?.a || '';
-  }
-  (document.getElementById('c_brand') as HTMLInputElement).value = core.identity?.brandName || '';
-  (document.getElementById('c_legal') as HTMLInputElement).value = core.identity?.legalEntityName || '';
-  (document.getElementById('c_city') as HTMLInputElement).value = core.contacts?.city || '';
-  (document.getElementById('c_phone') as HTMLInputElement).value = core.contacts?.phone || '';
-  (document.getElementById('c_address') as HTMLInputElement).value = core.contacts?.address || '';
-  (document.getElementById('c_email') as HTMLInputElement).value = core.contacts?.email || '';
-  (document.getElementById('c_ceo_name') as HTMLInputElement).value = core.people?.ceo?.name || '';
-  (document.getElementById('c_ceo_title') as HTMLInputElement).value = core.people?.ceo?.title || '';
-  (document.getElementById('c_ceo_bio') as HTMLTextAreaElement).value = core.people?.ceo?.bio || '';
-  (document.getElementById('c_h1_name') as HTMLInputElement).value = core.people?.heads?.[0]?.name || '';
-  (document.getElementById('c_h1_title') as HTMLInputElement).value = core.people?.heads?.[0]?.title || '';
-  (document.getElementById('c_h1_bio') as HTMLTextAreaElement).value = core.people?.heads?.[0]?.bio || '';
-  (document.getElementById('c_h2_name') as HTMLInputElement).value = core.people?.heads?.[1]?.name || '';
-  (document.getElementById('c_h2_title') as HTMLInputElement).value = core.people?.heads?.[1]?.title || '';
-  (document.getElementById('c_h2_bio') as HTMLTextAreaElement).value = core.people?.heads?.[1]?.bio || '';
-  (document.getElementById('c_history') as HTMLTextAreaElement).value = core.business?.history || '';
-  (document.getElementById('c_spec') as HTMLTextAreaElement).value = core.business?.specialization || '';
-  (document.getElementById('c_audience') as HTMLTextAreaElement).value = core.business?.targetAudience || '';
-  (document.getElementById('c_problem') as HTMLTextAreaElement).value = core.business?.clientProblem || '';
-  (document.getElementById('c_inputs') as HTMLTextAreaElement).value = core.product?.inputs || '';
-  (document.getElementById('c_process') as HTMLTextAreaElement).value = core.product?.process || '';
-  (document.getElementById('c_result') as HTMLTextAreaElement).value = core.product?.result || '';
-  (document.getElementById('c_limits') as HTMLTextAreaElement).value = core.product?.limits || '';
-}
-
-function gatherCoreFromEditor() {
-  return {
-    faq: Array.from({ length: 5 }, (_, i) => ({
-      q: (document.getElementById(`faq_q_${i}`) as HTMLInputElement).value,
-      a: (document.getElementById(`faq_a_${i}`) as HTMLTextAreaElement).value
-    })),
-    identity: {
-      brandName: (document.getElementById('c_brand') as HTMLInputElement).value,
-      legalEntityName: (document.getElementById('c_legal') as HTMLInputElement).value
-    },
-    contacts: {
-      city: (document.getElementById('c_city') as HTMLInputElement).value,
-      address: (document.getElementById('c_address') as HTMLInputElement).value,
-      phone: (document.getElementById('c_phone') as HTMLInputElement).value,
-      email: (document.getElementById('c_email') as HTMLInputElement).value
-    },
-    people: {
-      ceo: {
-        name: (document.getElementById('c_ceo_name') as HTMLInputElement).value,
-        title: (document.getElementById('c_ceo_title') as HTMLInputElement).value,
-        bio: (document.getElementById('c_ceo_bio') as HTMLTextAreaElement).value
-      },
-      heads: [
-        {
-          name: (document.getElementById('c_h1_name') as HTMLInputElement).value,
-          title: (document.getElementById('c_h1_title') as HTMLInputElement).value,
-          bio: (document.getElementById('c_h1_bio') as HTMLTextAreaElement).value
-        },
-        {
-          name: (document.getElementById('c_h2_name') as HTMLInputElement).value,
-          title: (document.getElementById('c_h2_title') as HTMLInputElement).value,
-          bio: (document.getElementById('c_h2_bio') as HTMLTextAreaElement).value
-        }
-      ]
-    },
-    business: {
-      history: (document.getElementById('c_history') as HTMLTextAreaElement).value,
-      specialization: (document.getElementById('c_spec') as HTMLTextAreaElement).value,
-      targetAudience: (document.getElementById('c_audience') as HTMLTextAreaElement).value,
-      clientProblem: (document.getElementById('c_problem') as HTMLTextAreaElement).value
-    },
-    product: {
-      inputs: (document.getElementById('c_inputs') as HTMLTextAreaElement).value,
-      process: (document.getElementById('c_process') as HTMLTextAreaElement).value,
-      result: (document.getElementById('c_result') as HTMLTextAreaElement).value,
-      limits: (document.getElementById('c_limits') as HTMLTextAreaElement).value
-    }
-  };
-}
-
-async function loadModels() {
-  const sel = document.getElementById('model') as HTMLSelectElement;
-  const search = document.getElementById('modelSearch') as HTMLInputElement;
-  const status = document.getElementById('modelSearchStatus')!;
-  sel.disabled = true;
-  status.textContent = 'Загрузка моделей…';
-  try {
-    const res = await fetch(`${API}/api/models`);
-    if (!res.ok) throw new Error('Не удалось загрузить модели');
-    const data = await res.json();
-    if (!sel.isConnected) return;
-    const siteMode = !!document.getElementById('generateSite');
-    type Model = { id: string; name?: string; pricing?: { prompt?: string; completion?: string; request?: string }; supported_parameters?: string[]; output_modalities?: string[]; max_completion_tokens?: number };
-    const models: Model[] = (data.models || []).filter((m: Model) => (!m.max_completion_tokens || m.max_completion_tokens >= (siteMode ? 12000 : 4000)) && m.supported_parameters?.includes('structured_outputs') && m.output_modalities?.includes('text') && !m.output_modalities?.includes('image'));
-    const freeOnly = document.getElementById('freeModelsOnly') as HTMLInputElement;
-    const isFree = (model: Model) => model.pricing?.prompt !== undefined && model.pricing?.completion !== undefined && Number(model.pricing.prompt) === 0 && Number(model.pricing.completion) === 0 && Number(model.pricing.request ?? 0) === 0;
-    let selectedModel = (siteMode ? models.find(m => m.id === 'google/gemini-2.5-flash')?.id : undefined) || models[0]?.id || '';
-    sel.addEventListener('change', () => { selectedModel = sel.value; });
-    const filter = () => {
-      const query = search.value.trim().toLocaleLowerCase();
-      const matches = models.filter(m => (!freeOnly.checked || isFree(m)) && `${m.name || ''} ${m.id}`.toLocaleLowerCase().includes(query));
-      sel.replaceChildren();
-      for (const model of matches) sel.add(new Option(`${model.name || model.id} · ${model.id}${isFree(model) ? ' · Бесплатно' : ''}`, model.id));
-      if (matches.some(m => m.id === selectedModel)) sel.value = selectedModel;
-      else selectedModel = sel.value;
-      sel.disabled = !matches.length;
-      status.textContent = matches.length ? `Найдено: ${matches.length} из ${models.length}` : 'Модели не найдены. Измените запрос.';
-    };
-    search.addEventListener('input', filter);
-    freeOnly.addEventListener('change', filter);
-    filter();
-  } catch {
-    status.textContent = 'Не удалось загрузить модели. Откройте страницу повторно.';
-  }
-}
-
 function renderSite() {
-  app.innerHTML = `
-    <section class="grid">
-      <article class="panel">
-        <header class="panel-header">
-          <div class="panel-title-group">
-            <h2>Настройки сайта</h2>
-            <p>Нейросеть создаст оформление и переведёт тексты из карточки.</p>
-          </div>
-        </header>
-        <div class="panel-body">
-          <div class="form-grid">
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Выберите компанию</span>
-              <div class="field-control">
-                <select id="siteCoreSelect"></select>
-              </div>
-              <span class="field-hint">Для создания сайта нужна утверждённая карточка. Проверить и утвердить её можно в <a href="#library">библиотеке</a>.</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Язык</span>
-              <div class="field-control">
-                <select id="lang">
-                  <option value="ru">Русский</option>
-                  <option value="de">Deutsch</option>
-                </select>
-              </div>
-            </div>
-            <div class="field" style="grid-column:1/-1"><label class="field-label" for="modelSearch">Модель для создания сайта</label><div class="field-control"><input type="search" id="modelSearch" aria-label="Поиск модели OpenRouter" placeholder="Поиск по названию или ID модели" /></div><div class="field-control"><select id="model" aria-label="Модель OpenRouter"></select></div><span id="modelSearchStatus" role="status"></span></div>
-            <div class="field" style="grid-column:1/-1"><label class="field-label" for="style">Пожелания к оформлению</label><div class="field-control"><textarea id="style" maxlength="1000" rows="3">Строгий современный B2B-сайт. Светлый фон, графитовые акценты, выразительная типографика и удобная мобильная версия.</textarea></div><span class="field-hint">Модель создаёт HTML/CSS. Имена и контакты берутся из карточки без изменений.</span></div>
-            <input type="hidden" id="coreId" />
-            <div class="actions">
-              <button class="btn" id="generateSite"><span>Создать сайт с AI</span></button>
-              <button class="btn ghost" id="refreshCoresSite"><span>Обновить</span></button>
-              <button class="btn ghost" id="downloadZip" disabled><span>Скачать ZIP</span></button>
-              <span class="status" id="site-status">Каждая генерация создаёт отдельную версию</span>
-            </div>
-          </div>
-          <aside class="result">
-            <header class="result-header">
-              <div>
-                <h3>Готовый сайт</h3>
-                <span class="result-sub">Три страницы и файлы оформления</span>
-              </div>
-            </header>
-            <div class="result-body">
-              <pre class="result-placeholder" id="siteResult">Выберите компанию из библиотеки. Данные её карточки станут основой нового сайта.</pre>
-            </div>
-          </aside>
-        </div>
-      </article>
-      <div id="sitePreview" class="hidden"></div>
-      <details class="panel code-details hidden" id="siteSourceFiles">
-        <summary>Исходные файлы сайта <span>HTML и CSS</span></summary>
-        <div class="panel-body" style="grid-template-columns: 1fr; gap: 16px;">
-          <div class="field" style="grid-column: 1 / -1;">
-            <span class="field-label">Файл</span>
-            <div class="field-control">
-              <select id="fileSelect"></select>
-            </div>
-          </div>
-          <div class="result" style="grid-column: 1 / -1; min-height: 400px;">
-            <header class="result-header">
-              <div>
-                <h3>Содержимое</h3>
-                <span class="result-sub">Исходный код выбранного файла</span>
-              </div>
-            </header>
-            <div class="result-body">
-              <pre id="fileContent">Сгенерируйте сайт для предпросмотра</pre>
-            </div>
-          </div>
-        </div>
-      </details>
-    </section>
-  `;
+  app.innerHTML = siteMarkup();
 
   pageHeading('Создать сайт', 'Соберите сайт на основе проверенной карточки. Скачайте готовые файлы одним архивом.', '02 / Сайт компании');
   setupSite();
@@ -709,7 +371,7 @@ function setupSite() {
     };
 
     try {
-      const res = await fetchGeneration(`${API}/api/site/generate`, body);
+      const res = await fetchGeneration(`/api/site/generate`, body);
       const data = await res.json();
       if (res.ok) {
         lastSiteData = data;
@@ -763,7 +425,7 @@ function setupSite() {
 
 async function loadCoresForSelect() {
   try {
-    const res = await fetch(`${API}/api/core/list`);
+    const res = await fetch(`/api/core/list`);
     const data = await res.json();
     cores = data.cores || [];
     const select = document.getElementById('siteCoreSelect') as HTMLSelectElement;
@@ -793,7 +455,7 @@ async function loadCoresForSelect() {
 
 async function loadCores() {
   try {
-    const res = await fetch(`${API}/api/core/list`);
+    const res = await fetch(`/api/core/list`);
     const data = await res.json();
     cores = data.cores || [];
     if (location.hash === '#library') renderLibrary();
@@ -803,24 +465,7 @@ async function loadCores() {
 }
 
 function renderLibrary() {
-  app.innerHTML = `
-    <section class="grid">
-      <article class="panel">
-        <header class="panel-header">
-          <div class="panel-title-group">
-            <h2>Сохранённые компании <span class="library-count">${cores.length}</span></h2>
-            <p>Откройте карточку, чтобы проверить данные или создать сайт.</p>
-          </div>
-          <button class="btn ghost" id="reloadLib"><span>Обновить</span></button>
-        </header>
-        <div class="panel-body">
-          <div class="field" style="grid-column:1/-1"><label class="field-label" for="librarySearch">Поиск компании</label><div class="field-control"><input type="search" id="librarySearch" placeholder="Название, город или специализация" /></div></div>
-          <div class="library-grid" id="libGrid"></div>
-          <span class="field-hint" id="librarySearchStatus" role="status" style="grid-column:1/-1"></span>
-        </div>
-      </article>
-    </section>
-  `;
+  app.innerHTML = libraryMarkup(cores.length);
   pageHeading('Библиотека', 'Все компании в одном месте. Карточки можно редактировать и использовать для создания сайтов.', 'Компании и результаты');
   const create = document.createElement('button'); create.className = 'btn'; create.textContent = '+ Новая компания';
   create.addEventListener('click', () => navigate('company'));

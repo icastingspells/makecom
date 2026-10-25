@@ -11,10 +11,12 @@
     "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w server && npm run build -w client",
     "test": "npm run test -w server",
-    "typecheck": "npm run typecheck -w server",
-    "lint": "echo \"lint not configured yet\""
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=24.15.0"
   }
 }

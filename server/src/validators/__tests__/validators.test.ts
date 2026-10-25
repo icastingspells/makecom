@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CoreValidator } from '../core-validator.js';
-import { CrossModuleValidator } from '../cross-module.js';
-import { CompanyCore, CoreSnapshot } from '../../core/types.js';
+import { CompanyCore } from '../../core/types.js';
 
 function buildTestCore(): CompanyCore {
   const person = { name: 'Anna Weber', title: 'CEO', bio: '20 years in fintech' };
@@ -62,41 +61,5 @@ describe('CoreValidator', () => {
     const core = buildTestCore();
     core.identity.legalEntityName = '';
     expect(new CoreValidator().hasRequiredCoreFields(core)).toBe(false);
-  });
-});
-
-describe('CrossModuleValidator', () => {
-  const validator = new CrossModuleValidator();
-
-  it('rejects module payload that regenerates core identity/contacts', () => {
-    const core = buildTestCore();
-    const snapshot: CoreSnapshot = { core, hash: 'abc', createdAt: '2026-01-01T00:00:00.000Z' };
-
-    const result = validator.validateNoCoreRegeneration(snapshot, {
-      identity: { legalEntityName: 'Other GmbH' }
-    });
-
-    expect(result.valid).toBe(false);
-    expect(result.errors.join(' ')).toContain('identity');
-  });
-
-  it('allows module payload without core blocks', () => {
-    const core = buildTestCore();
-    const snapshot: CoreSnapshot = { core, hash: 'abc', createdAt: '2026-01-01T00:00:00.000Z' };
-
-    const result = validator.validateNoCoreRegeneration(snapshot, { policyText: 'Some legal text' });
-    expect(result.valid).toBe(true);
-  });
-
-  it('detects fact mismatch with CompanyCore', () => {
-    const core = buildTestCore();
-    const result = validator.validateFactsMatch(core, { legalEntityName: 'Wrong GmbH' });
-    expect(result.valid).toBe(false);
-  });
-
-  it('accepts matching facts', () => {
-    const core = buildTestCore();
-    const result = validator.validateFactsMatch(core, { legalEntityName: 'Alpha Research GmbH' });
-    expect(result.valid).toBe(true);
   });
 });

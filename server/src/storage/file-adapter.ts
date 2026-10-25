@@ -1,144 +1,62 @@
 import type { GenerationOperation } from '../services/operations.js';
-import { IStorage, SiteVersion, CompanyModuleResult } from './types.js';
-import { CompanyCore } from '../core/types.js';
-import fs from 'fs/promises';
-import path from 'path';
-import { randomUUID } from 'crypto';
+import type { IStorage, SiteVersion, CompanyModuleResult } from './types.js';
+import type { CompanyCore } from '../core/types.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
-/**
- * Файловый адаптер для локальной разработки
- * Хранит данные в JSON файлах
- */
+/** Legacy/local JSON storage. All reads are strict and all writes publish complete files. */
 export class FileAdapter implements IStorage {
-  private dataDir: string;
+  constructor(private readonly dataDir: string = './data') {}
 
-  constructor(dataDir: string = './data') {
-    this.dataDir = dataDir;
+  private filename(collection: string, id: string): string {
+    if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error('Invalid record ID');
+    return path.join(this.dataDir, collection, id + '.json');
   }
 
-  private async ensureDir(dir: string): Promise<void> {
-    try {
-      await fs.mkdir(dir, { recursive: true });
-    } catch {
-      // ignore
-    }
-  }
-
-  async saveOperation(operation: GenerationOperation): Promise<void> {
-    const dir = path.join(this.dataDir, 'operations');
-    await fs.mkdir(dir, { recursive: true });
-    const target = path.join(dir, operation.id + '.json');
+  private async write(collection: string, item: { id: string }, immutable = false): Promise<void> {
+    const target = this.filename(collection, item.id);
+    await fs.mkdir(path.dirname(target), { recursive: true });
     const temporary = target + '.' + randomUUID() + '.tmp';
     try {
-      await fs.writeFile(temporary, JSON.stringify(operation), 'utf8');
-      await fs.rename(temporary, target);
+      await fs.writeFile(temporary, JSON.stringify(item, null, 2), 'utf8');
+      if (immutable) await fs.link(temporary, target);
+      else await fs.rename(temporary, target);
     } finally { await fs.unlink(temporary).catch(() => {}); }
   }
-  async getOperation(id: string): Promise<GenerationOperation | null> {
-    try { return JSON.parse(await fs.readFile(path.join(this.dataDir, 'operations', id + '.json'), 'utf8')); }
+
+  private async read<T>(collection: string, id: string): Promise<T | null> {
+    try { return JSON.parse(await fs.readFile(this.filename(collection, id), 'utf8')) as T; }
     catch (error: any) { if (error.code === 'ENOENT') return null; throw error; }
   }
-  async listOperations(): Promise<GenerationOperation[]> {
-    const dir = path.join(this.dataDir, 'operations');
-    await fs.mkdir(dir, { recursive: true });
-    const names = (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
-    const records = await Promise.all(names.map(name => this.getOperation(name.slice(0, -5))));
-    return records.filter((record): record is GenerationOperation => !!record).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+
+  private async list<T>(collection: string): Promise<T[]> {
+    let names: string[];
+    try { names = await fs.readdir(path.join(this.dataDir, collection)); }
+    catch (error: any) { if (error.code === 'ENOENT') return []; throw error; }
+    const result = await Promise.all(names.filter(name => name.endsWith('.json')).map(name => this.read<T>(collection, name.slice(0, -5))));
+    return result.filter(item => item !== null) as T[];
   }
 
-  async saveCore(core: CompanyCore): Promise<CompanyCore> {
-    const dir = path.join(this.dataDir, 'companies');
-    await this.ensureDir(dir);
-    const filePath = path.join(dir, `${core.id}.json`);
-    const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-    try {
-      await fs.writeFile(temporaryPath, JSON.stringify(core, null, 2), 'utf-8');
-      await fs.rename(temporaryPath, filePath);
-    } finally {
-      await fs.unlink(temporaryPath).catch(() => {});
-    }
-    return core;
-  }
-
-  async getCore(id: string): Promise<CompanyCore | null> {
-    try {
-      const filePath = path.join(this.dataDir, 'companies', `${id}.json`);
-      const content = await fs.readFile(filePath, 'utf-8');
-      return JSON.parse(content) as CompanyCore;
-    } catch {
-      return null;
-    }
-  }
-
+  async saveCore(core: CompanyCore): Promise<CompanyCore> { await this.write('companies', core); return core; }
+  async getCore(id: string): Promise<CompanyCore | null> { return this.read('companies', id); }
   async listCores(): Promise<CompanyCore[]> {
-    try {
-      const dir = path.join(this.dataDir, 'companies');
-      await this.ensureDir(dir);
-      const files = await fs.readdir(dir);
-      const cores: CompanyCore[] = [];
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const content = await fs.readFile(path.join(dir, file), 'utf-8');
-          cores.push(JSON.parse(content));
-        }
-      }
-      return cores;
-    } catch {
-      return [];
-    }
+    return (await this.list<CompanyCore>('companies')).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async saveSiteVersion(version: SiteVersion): Promise<SiteVersion> {
-    const dir = path.join(this.dataDir, 'site-versions');
-    await this.ensureDir(dir);
-    const filePath = path.join(dir, `${version.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(version, null, 2), 'utf-8');
-    return version;
-  }
-
+  async saveSiteVersion(version: SiteVersion): Promise<SiteVersion> { await this.write('site-versions', version, true); return version; }
   async getSiteVersions(coreId: string): Promise<SiteVersion[]> {
-    try {
-      const dir = path.join(this.dataDir, 'site-versions');
-      await this.ensureDir(dir);
-      const files = await fs.readdir(dir);
-      const versions: SiteVersion[] = [];
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const content = await fs.readFile(path.join(dir, file), 'utf-8');
-          const v = JSON.parse(content) as SiteVersion;
-          if (v.coreId === coreId) versions.push(v);
-        }
-      }
-      return versions;
-    } catch {
-      return [];
-    }
+    return (await this.list<SiteVersion>('site-versions')).filter(item => item.coreId === coreId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async saveModuleResult(result: CompanyModuleResult): Promise<CompanyModuleResult> {
-    const dir = path.join(this.dataDir, 'modules');
-    await this.ensureDir(dir);
-    const filePath = path.join(dir, `${result.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(result, null, 2), 'utf-8');
-    return result;
-  }
-
+  async saveModuleResult(result: CompanyModuleResult): Promise<CompanyModuleResult> { await this.write('modules', result, true); return result; }
   async getModuleResults(coreId: string): Promise<CompanyModuleResult[]> {
-    try {
-      const dir = path.join(this.dataDir, 'modules');
-      await this.ensureDir(dir);
-      const files = await fs.readdir(dir);
-      const results: CompanyModuleResult[] = [];
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const content = await fs.readFile(path.join(dir, file), 'utf-8');
-          const r = JSON.parse(content) as CompanyModuleResult;
-          if (r.coreId === coreId) results.push(r);
-        }
-      }
-      return results;
-    } catch {
-      return [];
-    }
+    return (await this.list<CompanyModuleResult>('modules')).filter(item => item.coreId === coreId);
+  }
+
+  async saveOperation(operation: GenerationOperation): Promise<void> { await this.write('operations', operation); }
+  async getOperation(id: string): Promise<GenerationOperation | null> { return this.read('operations', id); }
+  async listOperations(): Promise<GenerationOperation[]> {
+    return (await this.list<GenerationOperation>('operations')).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 }

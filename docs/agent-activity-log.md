@@ -1,5 +1,15 @@
 # Agent Activity Log
 
+## 035 | 2026-10-26 | Stage 4: local database and code unification
+- Checkpoint be417c5 created first as requested; only then refactored/removed files. User accepted prior live checks. No GitHub push, cloud deployment or history rewrite.
+- Added built-in node:sqlite adapter (Node 24.15+): parameterized queries, WAL/busy timeout, schema-version guard, immutable site/module IDs, shared connection per path and shutdown close. Existing file driver/env retained; new env template recommends SQLite.
+- Added explicit storage:import command: dry-run by default, strict source reads, full transaction into empty destination, rollback/no overwrite, original JSON preserved. Actual user library dry-run reported 9 companies/6 sites/22 operations; no import/driver switch performed.
+- Split static company/site/library views, settings controller, card versions, typed editor fields and model selector out of main.ts (about 925 -> 535 lines). Separated app factory from server entry. Unified file reads/writes: corrupted files surface errors, complete atomic writes, immutable versions.
+- Removed unused old CSS, CrossModule/Joint stubs and their obsolete tests, no-op proxy test, unused barrels, duplicate root env example, unused cors dependency. Build clears only server/dist; workspace typecheck covers client/server. Kept future module types/registry and cloud adapter/preparation.
+- Checks: 61 tests/15 files, full build and workspace typechecks pass. SQLite tests include a separate process read and reopened API with saved core/files/snapshot/history. Mock browser QA on isolated SQLite 3018 passed company/approval/site/preview/settings; server stopped/tab closed. No real keys, paid calls or user-data writes.
+- Before GitHub (stage 5), audit historical credential-bearing tracked files; checkpoint removed current files but did not rewrite earlier history. SQLite remains optional and local operation requires no cloud.
+
+
 ## 034 | 2026-10-26 | User acceptance and pre-unification checkpoint
 - User confirmed all manual checks work and authorized stage 4, explicitly requiring a commit before refactoring/deletion. This is user acceptance, not a new independent agent live-generation check.
 - Prepared the current working tree for a local checkpoint: scanned non-ignored source/docs for credential patterns, no findings; .env/data/proxy binaries remain excluded, local .err and SQLite artifacts ignored. Existing removals of credential-bearing helper/proxy files preserved. No history rewrite or GitHub publication authorized/performed.
@@ -198,3 +208,25 @@ Historical references to removed documentation paths in older entries are preser
 - **Action:** Found real OpenRouter key committed in server/.env.bak and server/start-test.cmd; removed from index and disk, added .gitignore rules for .env.bak, singbox/, *.exe, start-test.cmd
 - **Result:** No tracked file contains the key (verified with git grep)
 - **Note:** singbox/config.json contained VLESS credentials and was also untracked
+
+
+## 2026-10-26 | SECURITY | Preserve history and redact historical OpenRouter credentials
+- User explicitly authorized token removal while preserving all prior commits.
+- Rewrote credential-bearing history; preserved all 10 commits, all 4 refs, commit messages, authors, dates and commit order. Commit IDs changed.
+- Checkpoint be417c5 is now f72989e. Current HEAD tree and all current working files were verified unchanged.
+- Expired old reflogs and pruned obsolete Git objects. Full remaining object scan: 186 blobs, zero matches for real OpenRouter key format.
+- No GitHub push or deployment. Existing local runtime settings and user library were preserved. Previously exposed keys still require revocation by their owner.
+
+
+## 2026-10-26 | RELEASE | Local GitHub preparation
+- Removed verified empty root data/examples/templates directories. Preserved local proxy tools and archive under ignored .local/legacy-proxy; user library and server/.env untouched.
+- Added GitHub Actions (Node 24.15, npm ci, typecheck, tests, build), .node-version and .editorconfig.
+- README now explains full-history main/dev publication, unified IStorage, SQLite persistence, two Supabase migrations, Render Blueprint settings and remaining cloud checks.
+- Verification: 61 tests in 15 files passed; both workspace typechecks and production build passed; diff whitespace check passed; original scope SHA-256 unchanged.
+- No remote configured, push, cloud resources or paid generation. Cloud access and local-to-Supabase transfer remain unverified/unimplemented respectively.
+
+
+## 2026-10-26 | GIT | Prepare dev publication
+- User supplied https://github.com/icastingspells/makecom.git and requested keeping changes in dev, without publishing main.
+- Configured origin; verified old dev was an ancestor of main, advanced dev to the existing checkpoint and switched to dev with all working changes preserved.
+- Main remains at f72989e. Full sanitized history retained; documentation now targets dev publication.
