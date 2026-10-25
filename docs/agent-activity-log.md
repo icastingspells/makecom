@@ -253,3 +253,9 @@ Historical references to removed documentation paths in older entries are preser
 - User requested the free Render option. Explicitly set plan: free in render.yaml, verified against the official Blueprint specification.
 - Supabase remains the persistent storage; no Render disk or database added. No cloud resource created.
 - Configuration-only change; diff checked, application tests unchanged.
+
+
+## 2026-10-26 | DOCS | Feature readiness and CompanyCore example
+- Added a compact feature readiness table to README with explicit partial and missing capabilities, without development-stage history.
+- Added an illustrative valid JSON CompanyCore matching the current Zod schema: two heads, five FAQ, facts and version approval.
+- Documentation-only change; validated embedded JSON against compiled CompanyCoreSchema and checked links/whitespace.
