@@ -64,7 +64,8 @@ export const CompanyCoreSchema = z.object({
   facts: z.record(z.string(), FactSchema),
   extensions: z.record(z.string(), z.unknown()),
   meta: z.object({
-    version: z.number().int().min(1)
+    version: z.number().int().min(1),
+    approval: z.object({ version: z.number().int().positive(), approvedAt: z.string().datetime() }).optional()
   })
 });
 

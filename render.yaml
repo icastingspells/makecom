@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: makecom
+    runtime: node
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start -w server
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.15.0
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DRIVER
+        value: supabase
+      - key: MOCK_LLM
+        value: "false"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: APP_ACCESS_PASSWORD
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: sites
+      - key: OPENROUTER_SPEND_LIMIT_PER_OP_USD
+        value: "0.10"

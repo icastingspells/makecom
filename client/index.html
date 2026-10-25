@@ -4,41 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Makecom — Генератор компании и сайта</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/workspace.css" />
   </head>
   <body>
-    <header>
-      <div class="header-inner">
-        <div class="logo">
-          <span class="logo-mark"></span>
-          <div>
-            <span class="logo-text">Makecom</span>
-            <span class="logo-sub">Генератор карточки компании и сайта</span>
-          </div>
-        </div>
-        <div class="status" id="global-status">Готово к работе</div>
-      </div>
-    </header>
-    <main>
-      <nav class="tabs">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="logo" href="#company" aria-label="Makecom — главная"><span class="logo-mark">m.</span><span>makecom<span class="logo-sub">Рабочее пространство</span></span></a>
+        <span class="nav-label">УПРАВЛЕНИЕ</span>
+        <nav class="tabs" aria-label="Основная навигация">
         <button class="tab active" data-tab="company">
-          <span>Этап А</span>
-          <span>Карточка компании</span>
+          <span class="nav-icon" aria-hidden="true">＋</span><span>Новая компания</span>
         </button>
         <button class="tab" data-tab="site">
-          <span>Этап Б</span>
-          <span>Генерация сайта</span>
+          <span class="nav-icon" aria-hidden="true">▤</span><span>Создать сайт</span>
         </button>
         <button class="tab" data-tab="library">
-          <span>Библиотека</span>
-          <span>Сохранённые компании</span>
+          <span class="nav-icon" aria-hidden="true">▦</span><span>Библиотека</span>
         </button>
-      </nav>
-      <div id="app"></div>
-    </main>
+        <button class="tab" data-tab="settings"><span class="nav-icon" aria-hidden="true">⚙</span><span>Подключение</span></button>
+        <button class="tab" data-tab="operations"><span class="nav-icon" aria-hidden="true">↺</span><span>История и расходы</span></button>
+        </nav>
+        <div class="sidebar-note"><span class="nav-label">ПОРЯДОК РАБОТЫ</span><p><span>01</span> Создайте компанию</p><p><span>02</span> Проверьте карточку</p><p><span>03</span> Соберите сайт</p></div>
+        <div class="sidebar-footer">Карточка — источник фактов.<br />Каждый сайт — отдельная версия.</div>
+      </aside>
+      <div class="workspace">
+        <header class="app-header"><div><span class="workspace-label">Рабочее пространство</span><span class="header-divider">/</span><span id="page-title">Новая компания</span></div><div class="status" id="global-status" role="status">Готово к работе</div></header>
+        <main><div id="app"></div></main>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -79,6 +79,7 @@ export interface CompanyCore {
   extensions: Record<string, unknown>;
   meta: {
     version: number;
+    approval?: { version: number; approvedAt: string };
   };
 }
 

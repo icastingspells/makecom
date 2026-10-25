@@ -1,26 +1,29 @@
+import { beginOperation } from './operations.js';
+import { isCoreApproved } from '../core/card-actions.js';
 import { Router } from 'express';
 import { CompanyCoreService } from '../core/company-core.js';
 import { createStorage } from '../storage/index.js';
-import { siteGenerator } from '../generators/site-generator.js';
-import { CrossModuleValidator } from '../validators/cross-module.js';
+import { aiSiteGenerator, SiteOptionsSchema, SiteGenerationError } from '../generators/ai-site-generator.js';
+import { requireOpenRouterSession, MissingSessionError } from './session.js';
 
 const router = Router();
 const coreService = new CompanyCoreService();
 const storage = createStorage();
-const crossValidator = new CrossModuleValidator();
 
 router.post('/generate', async (req, res) => {
+  let tracking: Awaited<ReturnType<typeof beginOperation>> | undefined;
+  let resultId: string | undefined;
   try {
-    const { coreId, lang = 'ru', style = 'default' } = req.body;
-
-    if (!coreId) {
-      return res.status(400).json({ error: 'coreId required' });
-    }
+    const apiKey = requireOpenRouterSession(req);
+    const parsed = SiteOptionsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Проверьте компанию, язык, модель и описание оформления', errors: parsed.error.issues.map(i => i.message) });
+    const { coreId } = parsed.data;
 
     const core = await storage.getCore(coreId);
     if (!core) {
       return res.status(404).json({ error: 'Core not found' });
     }
+    if (!isCoreApproved(core)) return res.status(409).json({ error: 'Перед генерацией сайта откройте карточку, проверьте данные и утвердите её текущую версию.' });
 
     coreService.createCore(core);
     const snapshot = coreService.createSnapshot();
@@ -29,24 +32,29 @@ router.post('/generate', async (req, res) => {
     }
 
     // Генерируем сайт ТОЛЬКО из снапшота
-    const result = siteGenerator.generate(snapshot, { lang, style });
+    tracking = await beginOperation(req, 'site', parsed.data.model);
+    const result = await aiSiteGenerator.generate(snapshot, parsed.data, apiKey, tracking.context);
 
-    // Базовая кросс-валидация - убеждаемся что не перегенерировали core
-    const check = crossValidator.validateNoCoreRegeneration(snapshot, result.files);
-    if (!check.valid) {
-      return res.status(400).json({ error: 'Cross-module validation failed', errors: check.errors });
-    }
-
+    await tracking.context.update({ stage: 'saving' });
     await storage.saveSiteVersion(result.version);
+    resultId = result.version.id;
+    await tracking.finish(true, resultId);
+    tracking = undefined;
 
     res.json({
       version: result.version,
       files: result.files,
       fileList: Object.keys(result.files),
-      snapshotHash: snapshot.hash
+      snapshotHash: snapshot.hash,
+      costUsd: result.costUsd, mock: result.mock, translationReviewRequired: true
     });
   } catch (err: any) {
+    if (tracking) { await tracking.finish(false, resultId).catch(() => console.error('[operations] Failed to save final status')); tracking = undefined; }
+    if (err instanceof MissingSessionError) return res.status(401).json({ error: err.message });
+    if (err instanceof SiteGenerationError) return res.status(502).json({ error: err.message });
     res.status(500).json({ error: err.message });
+  } finally {
+    if (tracking) await tracking.finish(false, resultId).catch(() => console.error('[operations] Failed to persist final operation status'));
   }
 });
 

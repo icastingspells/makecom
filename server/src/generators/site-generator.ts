@@ -3,6 +3,23 @@ import { SiteVersion } from '../storage/types.js';
 import { randomUUID } from 'crypto';
 
 /**
+ * Нормализация текста для безопасной вставки в HTML
+ * Заменяет typographic dash на обычный дефис, экранирует HTML-сущности
+ */
+function normalizeText(s: string): string {
+  return s
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, '-')  // typographic dashes
+    .replace(/[\u00A0\u202F\u2007]/g, ' ')                // non-breaking spaces
+    .replace(/[\u2018\u2019\u02BC]/g, "'")                // smart quotes
+    .replace(/[\u201C\u201D]/g, '"')                      // smart double quotes
+    .replace(/\u2026/g, '...')                            // ellipsis
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
  * Генератор сайта из снапшота CompanyCore
  * Берёт ТОЛЬКО факты из снапшота. Не придумывает новые факты
  * Работает только со статичными файлами
@@ -14,6 +31,7 @@ export class SiteGenerator {
   generate(snapshot: CoreSnapshot, options: { lang: 'ru' | 'de'; style: string }) {
     const core = snapshot.core;
     const siteId = randomUUID();
+    const t = (s: string | undefined) => normalizeText(s ?? '');
 
     // Шаблоны строятся ТОЛЬКО из фактов core
     const nav = {
@@ -30,8 +48,8 @@ export class SiteGenerator {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${core.identity.brandName} - ${core.business.specialization}</title>
-  <meta name="description" content="${core.business.clientProblem}">
+  <title>${t(core.identity.brandName)} - ${t(core.business.specialization)}</title>
+  <meta name="description" content="${t(core.business.clientProblem)}">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="favicon.ico">
 </head>
@@ -42,12 +60,12 @@ export class SiteGenerator {
     <a href="company.html">${nav.company}</a>
   </nav>
   <main>
-    <h1>${core.identity.brandName}</h1>
-    <p>${core.business.specialization}</p>
+    <h1>${t(core.identity.brandName)}</h1>
+    <p>${t(core.business.specialization)}</p>
     <h2>${options.lang === 'ru' ? 'Для кого' : 'Zielgruppe'}</h2>
-    <p>${core.business.targetAudience}</p>
+    <p>${t(core.business.targetAudience)}</p>
     <h2>${options.lang === 'ru' ? 'Проблема клиента' : 'Kundenproblem'}</h2>
-    <p>${core.business.clientProblem}</p>
+    <p>${t(core.business.clientProblem)}</p>
     <a href="product.html">${options.lang === 'ru' ? 'Узнать о продукте' : 'Mehr zum Produkt'}</a>
   </main>
 </body>
@@ -59,7 +77,7 @@ export class SiteGenerator {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${core.identity.brandName} - ${options.lang === 'ru' ? 'Продукт' : 'Produkt'}</title>
+  <title>${t(core.identity.brandName)} - ${options.lang === 'ru' ? 'Продукт' : 'Produkt'}</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="favicon.ico">
 </head>
@@ -72,15 +90,15 @@ export class SiteGenerator {
   <main>
     <h1>${options.lang === 'ru' ? 'Продукт' : 'Produkt'}</h1>
     <h2>${options.lang === 'ru' ? 'Входные данные' : 'Eingabedaten'}</h2>
-    <p>${core.product.inputs}</p>
+    <p>${t(core.product.inputs)}</p>
     <h2>${options.lang === 'ru' ? 'Как работает' : 'Funktionsweise'}</h2>
-    <p>${core.product.process}</p>
+    <p>${t(core.product.process)}</p>
     <h2>${options.lang === 'ru' ? 'Результат' : 'Ergebnis'}</h2>
-    <p>${core.product.result}</p>
+    <p>${t(core.product.result)}</p>
     <h2>${options.lang === 'ru' ? 'Ограничения' : 'Einschränkungen'}</h2>
-    <p>${core.product.limits}</p>
+    <p>${t(core.product.limits)}</p>
     <h2>FAQ</h2>
-    ${core.faq.map(f => `<h3>${f.q}</h3><p>${f.a}</p>`).join('\n    ')}
+    ${core.faq.map(f => `<h3>${t(f.q)}</h3><p>${t(f.a)}</p>`).join('\n    ')}
   </main>
 </body>
 </html>`;
@@ -91,7 +109,7 @@ export class SiteGenerator {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${core.identity.brandName} - ${options.lang === 'ru' ? 'Компания и контакты' : 'Unternehmen & Kontakt'}</title>
+  <title>${t(core.identity.brandName)} - ${options.lang === 'ru' ? 'Компания и контакты' : 'Unternehmen & Kontakt'}</title>
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="favicon.ico">
 </head>
@@ -104,14 +122,14 @@ export class SiteGenerator {
   <main>
     <h1>${options.lang === 'ru' ? 'Компания' : 'Unternehmen'}</h1>
     <h2>${options.lang === 'ru' ? 'История' : 'Geschichte'}</h2>
-    <p>${core.business.history}</p>
+    <p>${t(core.business.history)}</p>
     <h2>${options.lang === 'ru' ? 'Специализация' : 'Spezialisierung'}</h2>
-    <p>${core.business.specialization}</p>
+    <p>${t(core.business.specialization)}</p>
     <h2>${options.lang === 'ru' ? 'Команда' : 'Team'}</h2>
-    <p><strong>${core.people.ceo.name}</strong> - ${core.people.ceo.title}<br>${core.people.ceo.bio}</p>
-    ${core.people.heads.map(h => `<p><strong>${h.name}</strong> - ${h.title}<br>${h.bio}</p>`).join('\n    ')}
+    <p><strong>${t(core.people.ceo.name)}</strong> - ${t(core.people.ceo.title)}<br>${t(core.people.ceo.bio)}</p>
+    ${core.people.heads.map(h => `<p><strong>${t(h.name)}</strong> - ${t(h.title)}<br>${t(h.bio)}</p>`).join('\n    ')}
     <h2>${options.lang === 'ru' ? 'Контакты' : 'Kontakt'}</h2>
-    <p>${core.identity.legalEntityName}<br>${core.contacts.address}<br>${core.contacts.city}<br>${core.contacts.phone}<br>${core.contacts.email}</p>
+    <p>${t(core.identity.legalEntityName)}<br>${t(core.contacts.address)}<br>${t(core.contacts.city)}<br>${t(core.contacts.phone)}<br>${t(core.contacts.email)}</p>
   </main>
 </body>
 </html>`;
@@ -128,6 +146,8 @@ h1 { margin-top: 0; }`;
     const version: SiteVersion = {
       id: siteId,
       coreId: core.id,
+      snapshot: structuredClone(snapshot),
+      files: { ...files },
       lang: options.lang,
       style: options.style,
       storagePath: `sites/${siteId}.zip`,

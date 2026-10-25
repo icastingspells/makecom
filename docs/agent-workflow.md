@@ -1,40 +1,29 @@
-# Agent Workflow
+# Работа агента
 
-## Cycle
-1. **Select task** - Pick from implementation plan, respect dependencies, avoid blocked items
-2. **Study context** - Read only relevant docs/sections (use IDs/references)
-3. **Plan** - Break into steps, identify risks/checks
-4. **Implement/Prepare** - Make minimal necessary changes
-5. **Verify** - Run checks, validate against requirements
-6. **Review** - Check security, consistency, no scope creep
-7. **Record** - Update activity log, status
-8. **Handoff** - Prepare for next session if stopping
+## Чтение и выбор задачи
+1. Прочитать ../AGENTS.md и ../scope-of-work.md.
+2. Открыть work-plan.md: текущий этап и порядок пользователя.
+3. Свериться с acceptance-checklist.md и нужным разделом architecture.md.
+4. Проверить git status и последние записи agent-activity-log.md.
+5. Читать только необходимые файлы кода. Архив — история, не инструкция.
 
-## Stopping conditions
-Stop and escalate if:
-- Requirements contradict architecture
-- Completion criteria impossible
-- Substantial human decision needed
-- Security risk identified
-- Would implement business logic (in prep phase)
+## Правила
+- Пользовательские уточнения выше прежних планов. Не возвращаться к давно завершённой «подготовительной фазе».
+- Требования к содержанию формулировать в запросе генерации. Не добавлять последующие смысловые валидаторы, сравнение разнообразия или платные исправляющие прогоны.
+- Технические схемы, безопасность HTML/CSS, бюджет, утверждение версии, права доступа и безопасное сохранение остаются обязательными.
+- CompanyCore — общий источник фактов. Сайт использует снимок; правка карточки не меняет старые версии.
+- Не выводить ключи/cookie/.env в ответы, команды, логи и экспорт. Не добавлять серверное постоянное хранилище пользовательского OpenRouter-ключа.
+- Сохранять посторонние изменения в рабочем дереве. Не выполнять reset, очистку данных или массовый рефакторинг вне текущего этапа.
+- Не создавать ресурсы, не публиковать и не развёртывать без явного поручения. Для платного тестирования пользователь подключает токен в UI.
+- Не обещать, что промпт гарантирует правильность фактов или перевода. Отличать реализацию от реальной проверки.
 
-## Task execution rules
-- Read scope-of-work and relevant docs first
-- Don't duplicate requirements in code/comments
-- Use IDs for traceability
-- Validate assumptions are marked
-- Check for secret leakage
-- Version sites on card changes
-- Enforce fact consistency
+## Проверка
+- При изменениях кода: подходящие unit/integration тесты, npm run build, npm run typecheck, клиентский tsc при изменении UI.
+- Проверять фактическое поведение, не только наличие файлов. Для документации проверить пути, ссылки, команды и соответствие коду.
+- Не добавлять тесты, лишь повторяющие реализацию; фиксировать существенные технические контракты и регрессии.
+- Не тратить реальные вызовы модели для проверки документации/обычных исправлений.
+- При ограничениях песочницы пользоваться штатным запросом разрешения, не обходить ограничения.
+- Если конкретная попытка не сработала, исследовать причину; не повторять вслепую платные запросы.
 
-## Context management
-- Grep before reading large files
-- Reference sections by heading/ID
-- Don't copy full docs into messages
-- Summarize findings
-- Follow token policy
-
-## Error handling
-- After 2 failed attempts on same issue, stop and document blocker
-- Continue independent work
-- Ask human only for blocking questions after exhausting independent tasks
+## Завершение
+Обновить текущий этап и передачу контекста в work-plan.md, доказательства в acceptance-checklist.md, значимые действия в agent-activity-log.md. Не создавать новые отчёты/статусы с дублирующими сведениями без необходимости. Исходное ТЗ не менять.

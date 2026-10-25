@@ -1,3 +1,7 @@
+import { mountGenerationControls, fetchGeneration, renderOperations, mountQuotaCheck } from './generation-operations';
+import { mountCompanyInputs } from './company-inputs';
+import { editorMarkup } from './editor-view';
+import { showSitePreview } from './site-preview';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -5,12 +9,23 @@ const app = document.getElementById('app') as HTMLElement;
 const tabs = document.querySelectorAll('.tab');
 const globalStatus = document.getElementById('global-status') as HTMLElement;
 
-const API = 'http://localhost:3000';
+const API = '';
 
 let cores: any[] = [];
 let selectedCoreId: string | null = null;
 let lastSiteData: any = null;
 let currentCoreData: any = null;
+let editorInputController = new AbortController();
+let activeRoute = '';
+
+function hasUnsavedChanges(): boolean {
+  if (!currentCoreData || !document.getElementById('c_brand')) return false;
+  return Object.entries(gatherCoreFromEditor()).some(([key, value]) => JSON.stringify(value) !== JSON.stringify(currentCoreData[key]));
+}
+
+window.addEventListener('beforeunload', event => {
+  if (hasUnsavedChanges()) { event.preventDefault(); event.returnValue = ''; }
+});
 
 function setGlobalStatus(text: string, type: 'info' | 'success' | 'error' = 'info') {
   globalStatus.textContent = text;
@@ -19,20 +34,109 @@ function setGlobalStatus(text: string, type: 'info' | 'success' | 'error' = 'inf
   if (type === 'error') globalStatus.classList.add('error');
 }
 
-tabs.forEach((tab) => {
-  tab.addEventListener('click', () => {
-    tabs.forEach((t) => t.classList.remove('active'));
-    tab.classList.add('active');
-    const target = (tab as HTMLElement).dataset.tab;
-    render(target);
+function navigate(view: string) { location.hash = view; }
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function pageHeading(title: string, description: string, eyebrow: string, back = false) {
+  const heading = document.createElement('div');
+  heading.className = 'page-heading';
+  heading.innerHTML = `<div><div class="eyebrow">${escapeHtml(eyebrow)}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p></div>${back ? '<button class="btn ghost" id="backToLibrary">← В библиотеку</button>' : ''}`;
+  app.prepend(heading);
+  document.getElementById('page-title')!.textContent = title;
+  app.querySelectorAll('.field').forEach(field => {
+    const caption = field.querySelector('span.field-label');
+    const control = field.querySelector<HTMLInputElement | HTMLSelectElement>('input, select');
+    if (caption && control?.id) {
+      const label = document.createElement('label');
+      label.className = 'field-label'; label.htmlFor = control.id; label.textContent = caption.textContent;
+      caption.replaceWith(label);
+    }
   });
-});
+}
+
+tabs.forEach((tab) => tab.addEventListener('click', () => navigate((tab as HTMLElement).dataset.tab || 'company')));
+
+async function renderRoute() {
+  const route = location.hash.slice(1) || 'company';
+  if (activeRoute && route !== activeRoute && hasUnsavedChanges() && !window.confirm('В карточке есть несохранённые изменения. Покинуть страницу без сохранения?')) {
+    history.replaceState(null, '', `#${activeRoute}`);
+    return;
+  }
+  activeRoute = route;
+  window.scrollTo(0, 0);
+  editorInputController.abort();
+  editorInputController = new AbortController();
+  const match = /^cards\/([^/]+)$/.exec(route);
+  tabs.forEach(t => {
+    const active = (t as HTMLElement).dataset.tab === (match ? 'library' : route);
+    t.classList.toggle('active', active);
+    if (active) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+  });
+  if (!match) { render(route); return; }
+  currentCoreData = null;
+  app.textContent = 'Загрузка карточки…';
+  try {
+    selectedCoreId = decodeURIComponent(match[1]);
+    const res = await fetch(`${API}/api/core/${encodeURIComponent(selectedCoreId)}`);
+    const data = await res.json();
+    if (location.hash.slice(1) !== route) return;
+    if (!res.ok) throw new Error(data.error || 'Не удалось загрузить карточку');
+    currentCoreData = data.core;
+    renderCoreEditor();
+  } catch (err: any) {
+    if (location.hash.slice(1) !== route) return;
+    app.innerHTML = '<p id="card-error"></p><button id="card-back">Вернуться в библиотеку</button>';
+    document.getElementById('card-error')!.textContent = err.message;
+    document.getElementById('card-back')!.addEventListener('click', () => navigate('library'));
+  }
+}
+window.addEventListener('hashchange', () => { void renderRoute(); });
 
 function render(view: string | undefined) {
   if (!view) view = 'company';
   if (view === 'company') renderCompany();
   else if (view === 'site') renderSite();
   else if (view === 'library') renderLibrary();
+  else if (view === 'settings') renderSettings();
+  else if (view === 'operations') { renderOperations(app); pageHeading('История и расходы', 'Ход генераций, попытки и подтверждённая стоимость.', 'Рабочее пространство'); }
+}
+
+function renderSettings() {
+  app.innerHTML = `<article class="panel"><header class="panel-header"><div class="panel-title-group"><h2>OpenRouter</h2><p>Ваш ключ используется для генерации компаний и сайтов.</p></div></header><div class="panel-body" style="grid-template-columns:1fr"><form id="tokenForm" class="form-grid"><div class="field" style="grid-column:1/-1"><label class="field-label" for="openRouterToken">Ключ API OpenRouter</label><div class="field-control"><input type="password" id="openRouterToken" autocomplete="off" spellcheck="false" placeholder="sk-or-…" required /></div><span class="field-hint">Хранится в зашифрованной HttpOnly cookie текущей сессии. Не записывается в базу, файлы или localStorage. Сервер получает ключ только для выполнения запросов.</span></div><div class="actions"><button class="btn" type="submit">Подключить</button><button class="btn ghost" type="button" id="clearToken">Удалить ключ из сессии</button></div><span class="status" id="tokenStatus" role="status"></span></form></div></article>`;
+  const quota = mountQuotaCheck();
+  pageHeading('Подключение', 'Управляйте ключом для текущей сессии браузера.', 'Настройки');
+  const status = document.getElementById('tokenStatus')!;
+  const input = document.getElementById('openRouterToken') as HTMLInputElement;
+  const form = document.getElementById('tokenForm') as HTMLFormElement;
+  const remove = document.getElementById('clearToken') as HTMLButtonElement;
+  let sessionRevision = 0;
+  void fetch('/api/session').then(r => r.json()).then(data => { if (!status.isConnected || sessionRevision !== 0) return; status.classList.toggle('is-connected', !!data.connected); status.textContent = data.connected ? 'Ключ добавлен в эту сессию. Содержимое ключа не возвращается в браузер.' : data.mock ? 'Включён тестовый режим без платных запросов.' : 'Ключ пока не добавлен.'; if (data.connected) void quota?.refresh(); }).catch(() => { if (sessionRevision !== 0 || !status.isConnected) return; status.classList.remove('is-connected'); status.textContent = 'Не удалось проверить подключение'; });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    sessionRevision++;
+    remove.disabled = true;
+    const button = form.querySelector<HTMLButtonElement>('[type=submit]')!; button.disabled = true;
+    quota?.clear();
+    try {
+      const body = JSON.stringify({ token: input.value.trim() }); input.value = '';
+      const res = await fetch('/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      const data = await res.json(); if (!res.ok) throw new Error(data.error);
+      status.textContent = 'Ключ добавлен в сессию. Можно создавать компании и сайты.';
+      status.classList.add('is-connected');
+      void quota?.refresh();
+    } catch (err: unknown) { status.classList.remove('is-connected'); status.textContent = err instanceof Error ? err.message : 'Не удалось подключить ключ'; }
+    finally { button.disabled = false; remove.disabled = false; }
+  });
+  remove.addEventListener('click', async () => {
+    sessionRevision++;
+    const connect = form.querySelector<HTMLButtonElement>('[type=submit]')!; connect.disabled = true; remove.disabled = true;
+    try { const res = await fetch('/api/session', { method: 'DELETE' }); if (!res.ok) throw new Error(); input.value = ''; status.classList.remove('is-connected'); status.textContent = 'Ключ удалён из сессии.'; quota?.clear(); }
+    catch { status.textContent = 'Не удалось удалить ключ. Повторите попытку.'; }
+    finally { connect.disabled = false; remove.disabled = false; }
+  });
 }
 
 function renderCompany() {
@@ -41,11 +145,11 @@ function renderCompany() {
       <article class="panel">
         <header class="panel-header">
           <div class="panel-title-group">
-            <h2>Этап А — Карточка компании</h2>
-            <p>Генерация, просмотр и редактирование CompanyCore</p>
+            <h2>Параметры компании</h2>
+            <p>Выберите параметры и модель для генерации.</p>
           </div>
           <div class="actions" style="padding: 0;">
-            <button class="btn" id="goToSite"><span>Перейти к генерации сайта</span></button>
+            <button class="btn ghost" id="goToSite"><span>Создать сайт →</span></button>
           </div>
         </header>
         <div class="panel-body">
@@ -53,15 +157,15 @@ function renderCompany() {
             <div class="field">
               <span class="field-label">Страна</span>
               <div class="field-control">
-                <input id="country" value="DE" placeholder="DE" />
+                <select id="country"><option value="DE">Германия</option></select>
               </div>
             </div>
             <div class="field">
               <span class="field-label">Масштаб</span>
               <div class="field-control">
                 <select id="scale">
-                  <option value="small">small</option>
-                  <option value="medium">medium</option>
+                  <option value="small">Небольшая компания</option>
+                  <option value="medium">Средняя компания</option>
                 </select>
               </div>
             </div>
@@ -74,161 +178,51 @@ function renderCompany() {
             <div class="field" style="grid-column: 1 / -1;">
               <span class="field-label">Модель OpenRouter</span>
               <div class="field-control">
-                <select id="model"></select>
+                <input id="modelSearch" type="search" aria-label="Поиск модели OpenRouter" placeholder="Поиск по названию или ID модели" />
               </div>
+              <div class="field-control">
+                <select id="model" aria-label="Модель OpenRouter"></select>
+              </div>
+              <span id="modelSearchStatus" role="status"></span>
             </div>
             <div class="actions">
               <button class="btn" id="generateCore">
                 <span>Сгенерировать карточку</span>
               </button>
-              <span class="status" id="core-status">Генерация через реальный OpenRouter</span>
+              <span class="status" id="core-status">Карточка сохранится в библиотеке</span>
             </div>
           </div>
           <aside class="result">
             <header class="result-header">
               <div>
-                <h3>Краткий результат</h3>
-                <span class="result-sub">ID и основная информация</span>
+                <h3>Новая карточка</h3>
+                <span class="result-sub">Здесь появится результат генерации</span>
               </div>
             </header>
             <div class="result-body">
-              <pre id="coreResult">Нажмите «Сгенерировать карточку», чтобы начать</pre>
+              <pre class="result-placeholder" id="coreResult">Задайте параметры компании и выберите модель. После генерации вы сможете проверить и отредактировать все тексты.</pre>
+              <button class="btn ghost hidden" id="openGenerated">Открыть карточку →</button>
             </div>
           </aside>
         </div>
       </article>
-      <article class="panel">
-        <header class="panel-header">
-          <div class="panel-title-group">
-            <h2>Просмотр и редактирование карточки</h2>
-            <p>Полная карточка компании со всеми полями</p>
-          </div>
-          <div class="actions" style="padding: 0;">
-            <button class="btn ghost" id="loadFullCore"><span>Загрузить выбранную</span></button>
-            <button class="btn" id="saveCore"><span>Сохранить изменения</span></button>
-          </div>
-        </header>
-        <div class="panel-body" style="grid-template-columns: 1fr;">
-          <div class="form-grid-full">
-            <div class="field">
-              <span class="field-label">Brand Name</span>
-              <div class="field-control"><input id="c_brand" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">Legal Entity Name</span>
-              <div class="field-control"><input id="c_legal" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">City</span>
-              <div class="field-control"><input id="c_city" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">Phone</span>
-              <div class="field-control"><input id="c_phone" /></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Address</span>
-              <div class="field-control"><input id="c_address" /></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Email</span>
-              <div class="field-control"><input id="c_email" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">CEO Name</span>
-              <div class="field-control"><input id="c_ceo_name" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">CEO Title</span>
-              <div class="field-control"><input id="c_ceo_title" /></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">CEO Bio</span>
-              <div class="field-control"><textarea id="c_ceo_bio" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field">
-              <span class="field-label">Head 1 Name</span>
-              <div class="field-control"><input id="c_h1_name" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">Head 1 Title</span>
-              <div class="field-control"><input id="c_h1_title" /></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Head 1 Bio</span>
-              <div class="field-control"><textarea id="c_h1_bio" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field">
-              <span class="field-label">Head 2 Name</span>
-              <div class="field-control"><input id="c_h2_name" /></div>
-            </div>
-            <div class="field">
-              <span class="field-label">Head 2 Title</span>
-              <div class="field-control"><input id="c_h2_title" /></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Head 2 Bio</span>
-              <div class="field-control"><textarea id="c_h2_bio" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">History</span>
-              <div class="field-control"><textarea id="c_history" style="width: 100%; min-height: 100px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Specialization</span>
-              <div class="field-control"><textarea id="c_spec" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Target Audience</span>
-              <div class="field-control"><textarea id="c_audience" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Client Problem</span>
-              <div class="field-control"><textarea id="c_problem" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Product Inputs</span>
-              <div class="field-control"><textarea id="c_inputs" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Product Process</span>
-              <div class="field-control"><textarea id="c_process" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Product Result</span>
-              <div class="field-control"><textarea id="c_result" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">Product Limits</span>
-              <div class="field-control"><textarea id="c_limits" style="width: 100%; min-height: 80px; border: none; background: transparent; color: var(--text); padding: 10px 14px; font-family: inherit;"></textarea></div>
-            </div>
-            <div class="actions">
-              <span class="status" id="core-edit-status">Выберите компанию из библиотеки или сгенерируйте новую</span>
-            </div>
-          </div>
-        </div>
-      </article>
+
     </section>
   `;
 
+  pageHeading('Новая компания', 'Создайте основу для будущего сайта: профиль компании, команду и описание продукта.', '01 / Создание');
+  mountCompanyInputs();
+  document.getElementById('openGenerated')?.addEventListener('click', () => { if (selectedCoreId) navigate(`cards/${selectedCoreId}`); });
+  mountGenerationControls();
   loadModels();
   setupCompany();
-  setupCoreEditor();
   const goToSite = document.getElementById('goToSite') as HTMLButtonElement;
   goToSite?.addEventListener('click', () => {
     tabs.forEach((t) => {
       t.classList.toggle('active', (t as HTMLElement).dataset.tab === 'site');
     });
-    render('site');
-    setTimeout(() => {
-      if (selectedCoreId) {
-        const coreIdInput = document.getElementById('coreId') as HTMLInputElement;
-        const select = document.getElementById('siteCoreSelect') as HTMLSelectElement;
-        if (coreIdInput) coreIdInput.value = selectedCoreId;
-        if (select) select.value = selectedCoreId;
-      }
-      setGlobalStatus('Переход к генерации сайта с выбранной карточкой', 'info');
-    }, 50);
+    navigate('site');
+    setGlobalStatus('Выберите утверждённую карточку для создания сайта', 'info');
   });
 }
 
@@ -238,6 +232,11 @@ function setupCompany() {
   const result = document.getElementById('coreResult') as HTMLElement;
 
   btn.addEventListener('click', async () => {
+    const model = document.getElementById('model') as HTMLSelectElement;
+    if (model.disabled || !model.value) {
+      status.textContent = 'Выберите доступную модель';
+      return;
+    }
     btn.disabled = true;
     status.textContent = 'Генерация уникальной карточки...';
     status.classList.remove('success', 'error');
@@ -247,25 +246,24 @@ function setupCompany() {
       country: (document.getElementById('country') as HTMLInputElement).value,
       scale: (document.getElementById('scale') as HTMLSelectElement).value,
       brandName: (document.getElementById('brandName') as HTMLInputElement).value || undefined,
+      businessDirection: (document.getElementById('businessDirection') as HTMLInputElement).value.trim() || undefined,
+      b2bServiceType: (document.getElementById('b2bServiceType') as HTMLInputElement).value.trim() || undefined,
       model: (document.getElementById('model') as HTMLSelectElement).value
     };
 
     try {
-      const res = await fetch(`${API}/api/core/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      const res = await fetchGeneration(`${API}/api/core/create`, body);
       const data = await res.json();
       if (res.ok) {
         status.textContent = 'Карточка сгенерирована';
         status.classList.add('success');
         setGlobalStatus('Карточка готова', 'success');
-        result.textContent = `ID: ${data.core.id}\nBrand: ${data.core.identity.brandName}\nLegal: ${data.core.identity.legalEntityName}\nCity: ${data.core.contacts.city}`;
+        result.textContent = `${data.core.identity.brandName}\n${data.core.identity.legalEntityName}\n${data.core.contacts.city}\nСтоимость: ${typeof data.costUsd === 'number' ? '$' + data.costUsd.toFixed(6) : 'см. историю: итог не подтверждён'}`;
+        document.getElementById('openGenerated')?.classList.remove('hidden');
         if (data.core?.id) {
           selectedCoreId = data.core.id;
           currentCoreData = data.core;
-          fillCoreEditor(data.core);
+
         }
         loadCores();
       } else {
@@ -285,57 +283,191 @@ function setupCompany() {
   });
 }
 
+function renderCoreEditor() {
+  app.innerHTML = editorMarkup();
+  pageHeading(currentCoreData.identity.brandName, 'Редактируйте данные компании. Изменения используются при создании новых версий сайта.', 'Библиотека / Карточка компании', true);
+  app.querySelectorAll<HTMLAnchorElement>('[data-section]').forEach(link => link.addEventListener('click', event => {
+    event.preventDefault();
+    document.getElementById(link.dataset.section!)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }));
+  document.getElementById('backToLibrary')?.addEventListener('click', () => navigate('library'));
+  document.getElementById('editorToSite')?.addEventListener('click', () => navigate('site'));
+  const faqEditor = document.getElementById('faqEditor')!;
+  for (let i = 0; i < 5; i++) {
+    const label = document.createElement('label');
+    label.textContent = `Вопрос ${i + 1}`;
+    const question = document.createElement('input');
+    question.id = `faq_q_${i}`;
+    const answerLabel = document.createElement('label');
+    answerLabel.textContent = `Ответ ${i + 1}`;
+    const answer = document.createElement('textarea');
+    answer.id = `faq_a_${i}`;
+    label.htmlFor = question.id;
+    answerLabel.htmlFor = answer.id;
+    label.className = answerLabel.className = 'field-label';
+    const pair = document.createElement('div'); pair.className = 'faq-pair';
+    for (const [caption, control] of [[label, question], [answerLabel, answer]] as const) {
+      const field = document.createElement('div'); field.className = 'field';
+      const wrapper = document.createElement('div'); wrapper.className = 'field-control';
+      wrapper.append(control); field.append(caption, wrapper); pair.append(field);
+    }
+    faqEditor.append(pair);
+  }
+  if (currentCoreData) fillCoreEditor(currentCoreData);
+  setupCardActions();
+  const review = document.getElementById('confirmFacts') as HTMLInputElement;
+  app.addEventListener('input', (event) => {
+    if (event.target !== review) review.checked = false;
+    refreshApprovalStatus();
+  }, { signal: editorInputController.signal });
+  setupCoreEditor();
+  void loadCardVersions(currentCoreData.id);
+}
+
+function refreshApprovalStatus() {
+  const label = document.getElementById('cardApprovalStatus');
+  if (!label || !currentCoreData) return;
+  const dirty = hasUnsavedChanges();
+  const approved = currentCoreData.meta.approval?.version === currentCoreData.meta.version;
+  label.textContent = dirty ? 'Есть несохранённые изменения. Сохраните их и утвердите новую версию.' : approved ? `Карточка утверждена · версия ${currentCoreData.meta.version} · ${new Date(currentCoreData.meta.approval.approvedAt).toLocaleString('ru-RU')}` : `Черновик · версия ${currentCoreData.meta.version}. Перед созданием сайта проверьте факты и утвердите карточку.`;
+  (document.getElementById('approveCore') as HTMLButtonElement).disabled = dirty || approved;
+  (document.getElementById('editorToSite') as HTMLButtonElement).disabled = dirty || !approved;
+}
+
+function setupCardActions() {
+  const status = document.getElementById('core-edit-status')!;
+  const approve = document.getElementById('approveCore') as HTMLButtonElement;
+  const exportButton = document.getElementById('exportCore') as HTMLButtonElement;
+  refreshApprovalStatus();
+  approve.addEventListener('click', async () => {
+    if (hasUnsavedChanges()) { status.textContent = 'Сначала сохраните изменения.'; return; }
+    if (!(document.getElementById('confirmFacts') as HTMLInputElement).checked) { status.textContent = 'Отметьте, что вы проверили согласованность фактов.'; return; }
+    const id = selectedCoreId;
+    approve.disabled = true;
+    try {
+      const response = await fetch(`${API}/api/core/${encodeURIComponent(id!)}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: currentCoreData.meta.version, consistencyReviewed: true }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error([data.error, ...(data.errors || [])].join('\n'));
+      if (selectedCoreId === id && approve.isConnected) {
+        currentCoreData = data.core;
+        (document.getElementById('confirmFacts') as HTMLInputElement).checked = false;
+        status.textContent = 'Карточка утверждена. Можно создавать сайт.';
+        refreshApprovalStatus();
+      }
+      await loadCores();
+    } catch (error) { status.textContent = error instanceof Error ? error.message : 'Не удалось утвердить карточку'; if (approve.isConnected) refreshApprovalStatus(); }
+  });
+  exportButton.addEventListener('click', async () => {
+    if (hasUnsavedChanges()) { status.textContent = 'Сохраните изменения перед скачиванием JSON.'; return; }
+    const id = selectedCoreId; exportButton.disabled = true;
+    try {
+      const response = await fetch(`${API}/api/core/${encodeURIComponent(id!)}/export`);
+      if (!response.ok) throw new Error('Не удалось скачать карточку');
+      saveAs(await response.blob(), `company-${id}.json`);
+      status.textContent = 'Сохранённая карточка скачана в JSON.';
+    } catch (error) { status.textContent = error instanceof Error ? error.message : 'Не удалось скачать карточку'; }
+    finally { exportButton.disabled = false; }
+  });
+}
+
+async function loadCardVersions(coreId: string) {
+  const container = document.getElementById('cardVersions')!;
+  container.textContent = 'Загрузка версий сайтов…';
+  try {
+    const res = await fetch(`${API}/api/site/versions/${encodeURIComponent(coreId)}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    if (!container.isConnected) return;
+    container.replaceChildren();
+    for (const version of data.versions || []) {
+      const row = document.createElement('p');
+      row.className = 'version-row';
+      const info = document.createElement('span');
+      info.textContent = `${version.lang === 'ru' ? 'Русский' : 'Немецкий'} · ${new Date(version.createdAt).toLocaleString('ru-RU')}`;
+      const id = document.createElement('small'); id.textContent = `Версия ${version.id.slice(0, 8)}${version.generation ? ' · ' + (version.generation.kind === 'ai' ? 'AI: ' : 'Тест: ') + version.generation.model : ''}`;
+      info.append(id); row.append(info);
+      const previewContainer = document.createElement('div'); previewContainer.className = 'version-preview hidden';
+      previewContainer.id = `version-preview-${version.id}`;
+      if (version.files) {
+        const preview = document.createElement('button'); preview.className = 'btn ghost'; preview.textContent = 'Открыть превью';
+
+        preview.setAttribute('aria-expanded', 'false'); preview.setAttribute('aria-controls', previewContainer.id);
+        preview.addEventListener('click', () => {
+          if (!previewContainer.classList.contains('hidden')) {
+            previewContainer.replaceChildren(); previewContainer.classList.add('hidden');
+            preview.textContent = 'Открыть превью'; preview.setAttribute('aria-expanded', 'false');
+          } else {
+            showSitePreview(previewContainer, version.files);
+            preview.textContent = 'Скрыть превью'; preview.setAttribute('aria-expanded', 'true');
+            previewContainer.scrollIntoView({ block: 'start' });
+          }
+        });
+        row.append(preview);
+
+        const download = document.createElement('button');
+        download.className = 'btn ghost';
+        download.textContent = 'Скачать ZIP';
+        download.addEventListener('click', async () => {
+          const zip = new JSZip();
+          for (const [name, content] of Object.entries(version.files)) zip.file(name, content as string);
+          saveAs(await zip.generateAsync({ type: 'blob' }), `site_${version.id}.zip`);
+        });
+        row.append(download);
+      } else row.append('Файлы старой версии не были сохранены.');
+      container.append(row);
+      if (version.files) container.append(previewContainer);
+    }
+    if (!data.versions?.length) container.append('Сайтов пока нет. Создайте первый сайт на основе этой карточки.');
+  } catch { container.textContent = 'Не удалось загрузить версии сайтов'; }
+}
+
 function setupCoreEditor() {
-  const loadBtn = document.getElementById('loadFullCore') as HTMLButtonElement;
   const saveBtn = document.getElementById('saveCore') as HTMLButtonElement;
   const status = document.getElementById('core-edit-status') as HTMLElement;
-
-  loadBtn.addEventListener('click', async () => {
-    if (!selectedCoreId) {
-      status.textContent = 'Сначала выберите компанию в библиотеке';
-      status.classList.add('error');
-      return;
-    }
-    try {
-      const res = await fetch(`${API}/api/core/${selectedCoreId}`);
-      if (!res.ok) {
-        status.textContent = 'Не удалось загрузить карточку';
-        status.classList.add('error');
-        return;
-      }
-      const data = await res.json();
-      currentCoreData = data.core;
-      fillCoreEditor(data.core);
-      status.textContent = 'Карточка загружена';
-      status.classList.remove('error');
-      status.classList.add('success');
-    } catch (e: any) {
-      status.textContent = e.message;
-      status.classList.add('error');
-    }
-  });
-
   saveBtn.addEventListener('click', async () => {
+    if (!hasUnsavedChanges()) { status.textContent = 'Нет изменений для сохранения. Если факты проверены, утвердите карточку.'; return; }
     if (!selectedCoreId || !currentCoreData) {
       status.textContent = 'Нет карточки для сохранения';
       status.classList.add('error');
       return;
     }
+    if (!(document.getElementById('confirmFacts') as HTMLInputElement).checked) {
+      status.textContent = 'Проверьте согласованность фактов и отметьте подтверждение перед сохранением.';
+      status.classList.add('error');
+      return;
+    }
     status.textContent = 'Сохранение...';
     status.classList.remove('success', 'error');
+    const editingId = selectedCoreId;
     try {
+      saveBtn.disabled = true;
       const core = gatherCoreFromEditor();
-      currentCoreData = { ...currentCoreData, ...core };
-      status.textContent = 'Изменения применены (локально). Сохранение в хранилище будет добавлено позже.';
+      const res = await fetch(`${API}/api/core/${encodeURIComponent(editingId)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...core, expectedVersion: currentCoreData.meta.version, consistencyReviewed: true })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error([data.error, ...(data.errors || [])].filter(Boolean).join('\n'));
+      if (selectedCoreId === editingId && document.getElementById('saveCore') === saveBtn) currentCoreData = data.core;
+      refreshApprovalStatus();
+      await loadCores();
+      status.textContent = 'Изменения сохранены. Для обновления сайта создайте новую версию.';
+      if (document.getElementById('saveCore') === saveBtn) (document.getElementById('confirmFacts') as HTMLInputElement).checked = false;
       status.classList.add('success');
     } catch (e: any) {
       status.textContent = e.message;
       status.classList.add('error');
+    } finally {
+      saveBtn.disabled = false;
     }
   });
 }
 
 function fillCoreEditor(core: any) {
+  for (let i = 0; i < 5; i++) {
+    (document.getElementById(`faq_q_${i}`) as HTMLInputElement).value = core.faq?.[i]?.q || '';
+    (document.getElementById(`faq_a_${i}`) as HTMLTextAreaElement).value = core.faq?.[i]?.a || '';
+  }
   (document.getElementById('c_brand') as HTMLInputElement).value = core.identity?.brandName || '';
   (document.getElementById('c_legal') as HTMLInputElement).value = core.identity?.legalEntityName || '';
   (document.getElementById('c_city') as HTMLInputElement).value = core.contacts?.city || '';
@@ -363,6 +495,10 @@ function fillCoreEditor(core: any) {
 
 function gatherCoreFromEditor() {
   return {
+    faq: Array.from({ length: 5 }, (_, i) => ({
+      q: (document.getElementById(`faq_q_${i}`) as HTMLInputElement).value,
+      a: (document.getElementById(`faq_a_${i}`) as HTMLTextAreaElement).value
+    })),
     identity: {
       brandName: (document.getElementById('c_brand') as HTMLInputElement).value,
       legalEntityName: (document.getElementById('c_legal') as HTMLInputElement).value
@@ -408,20 +544,38 @@ function gatherCoreFromEditor() {
 }
 
 async function loadModels() {
+  const sel = document.getElementById('model') as HTMLSelectElement;
+  const search = document.getElementById('modelSearch') as HTMLInputElement;
+  const status = document.getElementById('modelSearchStatus')!;
+  sel.disabled = true;
+  status.textContent = 'Загрузка моделей…';
   try {
     const res = await fetch(`${API}/api/models`);
+    if (!res.ok) throw new Error('Не удалось загрузить модели');
     const data = await res.json();
-    const sel = document.getElementById('model') as HTMLSelectElement;
-    if (!sel) return;
-    sel.innerHTML = '';
-    (data.models || []).slice(0, 80).forEach((m: any) => {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.name || m.id;
-      sel.appendChild(opt);
-    });
-  } catch (e) {
-    console.error(e);
+    if (!sel.isConnected) return;
+    const siteMode = !!document.getElementById('generateSite');
+    type Model = { id: string; name?: string; pricing?: { prompt?: string; completion?: string; request?: string }; supported_parameters?: string[]; output_modalities?: string[]; max_completion_tokens?: number };
+    const models: Model[] = (data.models || []).filter((m: Model) => (!m.max_completion_tokens || m.max_completion_tokens >= (siteMode ? 12000 : 4000)) && m.supported_parameters?.includes('structured_outputs') && m.output_modalities?.includes('text') && !m.output_modalities?.includes('image'));
+    const freeOnly = document.getElementById('freeModelsOnly') as HTMLInputElement;
+    const isFree = (model: Model) => model.pricing?.prompt !== undefined && model.pricing?.completion !== undefined && Number(model.pricing.prompt) === 0 && Number(model.pricing.completion) === 0 && Number(model.pricing.request ?? 0) === 0;
+    let selectedModel = (siteMode ? models.find(m => m.id === 'google/gemini-2.5-flash')?.id : undefined) || models[0]?.id || '';
+    sel.addEventListener('change', () => { selectedModel = sel.value; });
+    const filter = () => {
+      const query = search.value.trim().toLocaleLowerCase();
+      const matches = models.filter(m => (!freeOnly.checked || isFree(m)) && `${m.name || ''} ${m.id}`.toLocaleLowerCase().includes(query));
+      sel.replaceChildren();
+      for (const model of matches) sel.add(new Option(`${model.name || model.id} · ${model.id}${isFree(model) ? ' · Бесплатно' : ''}`, model.id));
+      if (matches.some(m => m.id === selectedModel)) sel.value = selectedModel;
+      else selectedModel = sel.value;
+      sel.disabled = !matches.length;
+      status.textContent = matches.length ? `Найдено: ${matches.length} из ${models.length}` : 'Модели не найдены. Измените запрос.';
+    };
+    search.addEventListener('input', filter);
+    freeOnly.addEventListener('change', filter);
+    filter();
+  } catch {
+    status.textContent = 'Не удалось загрузить модели. Откройте страницу повторно.';
   }
 }
 
@@ -431,8 +585,8 @@ function renderSite() {
       <article class="panel">
         <header class="panel-header">
           <div class="panel-title-group">
-            <h2>Этап Б — Генерация сайта из снапшота</h2>
-            <p>Сайт строится только из фактов CompanyCore</p>
+            <h2>Настройки сайта</h2>
+            <p>Нейросеть создаст оформление и переведёт тексты из карточки.</p>
           </div>
         </header>
         <div class="panel-body">
@@ -442,6 +596,7 @@ function renderSite() {
               <div class="field-control">
                 <select id="siteCoreSelect"></select>
               </div>
+              <span class="field-hint">Для создания сайта нужна утверждённая карточка. Проверить и утвердить её можно в <a href="#library">библиотеке</a>.</span>
             </div>
             <div class="field">
               <span class="field-label">Язык</span>
@@ -452,45 +607,32 @@ function renderSite() {
                 </select>
               </div>
             </div>
-            <div class="field">
-              <span class="field-label">Стиль</span>
-              <div class="field-control">
-                <input id="style" value="default" />
-              </div>
-            </div>
-            <div class="field" style="grid-column: 1 / -1;">
-              <span class="field-label">coreId</span>
-              <div class="field-control">
-                <input id="coreId" placeholder="Выберите компанию" />
-              </div>
-            </div>
+            <div class="field" style="grid-column:1/-1"><label class="field-label" for="modelSearch">Модель для создания сайта</label><div class="field-control"><input type="search" id="modelSearch" aria-label="Поиск модели OpenRouter" placeholder="Поиск по названию или ID модели" /></div><div class="field-control"><select id="model" aria-label="Модель OpenRouter"></select></div><span id="modelSearchStatus" role="status"></span></div>
+            <div class="field" style="grid-column:1/-1"><label class="field-label" for="style">Пожелания к оформлению</label><div class="field-control"><textarea id="style" maxlength="1000" rows="3">Строгий современный B2B-сайт. Светлый фон, графитовые акценты, выразительная типографика и удобная мобильная версия.</textarea></div><span class="field-hint">Модель создаёт HTML/CSS. Имена и контакты берутся из карточки без изменений.</span></div>
+            <input type="hidden" id="coreId" />
             <div class="actions">
-              <button class="btn" id="generateSite"><span>Сгенерировать сайт</span></button>
+              <button class="btn" id="generateSite"><span>Создать сайт с AI</span></button>
               <button class="btn ghost" id="refreshCoresSite"><span>Обновить</span></button>
               <button class="btn ghost" id="downloadZip" disabled><span>Скачать ZIP</span></button>
-              <span class="status" id="site-status">Только из снапшота</span>
+              <span class="status" id="site-status">Каждая генерация создаёт отдельную версию</span>
             </div>
           </div>
           <aside class="result">
             <header class="result-header">
               <div>
-                <h3>Файлы сайта</h3>
-                <span class="result-sub">index.html / product.html / company.html / style.css</span>
+                <h3>Готовый сайт</h3>
+                <span class="result-sub">Три страницы и файлы оформления</span>
               </div>
             </header>
             <div class="result-body">
-              <pre id="siteResult">Выберите компанию и сгенерируйте сайт</pre>
+              <pre class="result-placeholder" id="siteResult">Выберите компанию из библиотеки. Данные её карточки станут основой нового сайта.</pre>
             </div>
           </aside>
         </div>
       </article>
-      <article class="panel">
-        <header class="panel-header">
-          <div class="panel-title-group">
-            <h2>Предпросмотр файлов</h2>
-            <p>Содержимое сгенерированных HTML/CSS</p>
-          </div>
-        </header>
+      <div id="sitePreview" class="hidden"></div>
+      <details class="panel code-details hidden" id="siteSourceFiles">
+        <summary>Исходные файлы сайта <span>HTML и CSS</span></summary>
         <div class="panel-body" style="grid-template-columns: 1fr; gap: 16px;">
           <div class="field" style="grid-column: 1 / -1;">
             <span class="field-label">Файл</span>
@@ -502,7 +644,7 @@ function renderSite() {
             <header class="result-header">
               <div>
                 <h3>Содержимое</h3>
-                <span class="result-sub">Только факты из CompanyCore</span>
+                <span class="result-sub">Исходный код выбранного файла</span>
               </div>
             </header>
             <div class="result-body">
@@ -510,11 +652,14 @@ function renderSite() {
             </div>
           </div>
         </div>
-      </article>
+      </details>
     </section>
   `;
 
+  pageHeading('Создать сайт', 'Соберите сайт на основе проверенной карточки. Скачайте готовые файлы одним архивом.', '02 / Сайт компании');
   setupSite();
+  mountGenerationControls();
+  loadModels();
   loadCoresForSelect();
 }
 
@@ -548,31 +693,32 @@ function setupSite() {
       status.classList.add('error');
       return;
     }
+    const model = document.getElementById('model') as HTMLSelectElement;
+    if (model.disabled || !model.value) { status.textContent = 'Выберите доступную модель'; return; }
     btn.disabled = true;
     download.disabled = true;
-    status.textContent = 'Создаём снапшот и генерируем сайт...';
+    status.textContent = 'Нейросеть создаёт страницы и переводит тексты. Затем сервер подготовит файлы…';
     status.classList.remove('success', 'error');
     setGlobalStatus('Генерируем сайт из CompanyCore...', 'info');
 
     const body = {
       coreId,
       lang: (document.getElementById('lang') as HTMLSelectElement).value,
-      style: (document.getElementById('style') as HTMLInputElement).value
+      style: (document.getElementById('style') as HTMLTextAreaElement).value,
+      model: model.value
     };
 
     try {
-      const res = await fetch(`${API}/api/site/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      const res = await fetchGeneration(`${API}/api/site/generate`, body);
       const data = await res.json();
       if (res.ok) {
         lastSiteData = data;
-        status.textContent = 'Сайт сгенерирован';
+        showSitePreview(document.getElementById('sitePreview')!, data.files);
+        document.getElementById('siteSourceFiles')!.classList.remove('hidden');
+        status.textContent = data.mock ? 'Тестовый режим: сайт создан шаблоном, без запроса к нейросети.' : 'AI-сайт создан. Перед публикацией проверьте перевод и сохранение смысла.';
         status.classList.add('success');
         setGlobalStatus('Сайт готов', 'success');
-        result.textContent = JSON.stringify({ version: data.version, fileList: data.fileList, snapshotHash: data.snapshotHash }, null, 2);
+        result.textContent = `Сайт готов к скачиванию.\nФайлов: ${data.fileList.length}\nЯзык: ${body.lang === 'ru' ? 'Русский' : 'Немецкий'}\nМодель: ${body.model}\nСтоимость: ${typeof data.costUsd === 'number' ? '$' + data.costUsd.toFixed(5) : 'нет данных'}\nВерсия: ${data.version.id.slice(0, 8)}`;
         if (fileSelect) {
           fileSelect.innerHTML = '';
           (data.fileList || []).forEach((f: string) => {
@@ -624,15 +770,19 @@ async function loadCoresForSelect() {
     const coreIdInput = document.getElementById('coreId') as HTMLInputElement;
     if (!select) return;
     select.innerHTML = '<option value="">-- Выбрать компанию --</option>';
+    if (coreIdInput) coreIdInput.value = '';
     cores.forEach((c: any) => {
       const opt = document.createElement('option');
       opt.value = c.id;
-      const name = c.core?.identity?.brandName || c.id;
-      const country = c.core?.identity?.country || '';
-      opt.textContent = `${name} ${country ? '[' + country + ']' : ''} · ${c.id.slice(0, 8)}`;
+      const name = (c.core || c).identity?.brandName || c.id;
+      const country = (c.core || c).inputs?.country || '';
+      const core = c.core || c;
+      const approved = core.meta?.approval?.version === core.meta?.version && !!core.meta?.approval;
+      opt.disabled = !approved;
+      opt.textContent = `${name} ${country ? '[' + country + ']' : ''} · ${c.id.slice(0, 8)}${approved ? ' · утверждена' : ' · нужно утвердить'}`;
       select.appendChild(opt);
     });
-    if (selectedCoreId) {
+    if (selectedCoreId && cores.some(c => c.id === selectedCoreId && (c.core || c).meta?.approval?.version === (c.core || c).meta?.version && (c.core || c).meta?.approval)) {
       select.value = selectedCoreId;
       if (coreIdInput) coreIdInput.value = selectedCoreId;
     }
@@ -646,7 +796,7 @@ async function loadCores() {
     const res = await fetch(`${API}/api/core/list`);
     const data = await res.json();
     cores = data.cores || [];
-    renderLibrary();
+    if (location.hash === '#library') renderLibrary();
   } catch (e) {
     console.error(e);
   }
@@ -658,50 +808,67 @@ function renderLibrary() {
       <article class="panel">
         <header class="panel-header">
           <div class="panel-title-group">
-            <h2>Библиотека компаний</h2>
-            <p>Кликните по карточке для выбора и перехода к генерации сайта</p>
+            <h2>Сохранённые компании <span class="library-count">${cores.length}</span></h2>
+            <p>Откройте карточку, чтобы проверить данные или создать сайт.</p>
           </div>
           <button class="btn ghost" id="reloadLib"><span>Обновить</span></button>
         </header>
         <div class="panel-body">
+          <div class="field" style="grid-column:1/-1"><label class="field-label" for="librarySearch">Поиск компании</label><div class="field-control"><input type="search" id="librarySearch" placeholder="Название, город или специализация" /></div></div>
           <div class="library-grid" id="libGrid"></div>
+          <span class="field-hint" id="librarySearchStatus" role="status" style="grid-column:1/-1"></span>
         </div>
       </article>
     </section>
   `;
+  pageHeading('Библиотека', 'Все компании в одном месте. Карточки можно редактировать и использовать для создания сайтов.', 'Компании и результаты');
+  const create = document.createElement('button'); create.className = 'btn'; create.textContent = '+ Новая компания';
+  create.addEventListener('click', () => navigate('company'));
+  app.querySelector('.page-heading')!.append(create);
   document.getElementById('reloadLib')?.addEventListener('click', loadCores);
+  const search = document.getElementById('librarySearch') as HTMLInputElement;
+  search.addEventListener('input', () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    let visible = 0;
+    app.querySelectorAll<HTMLButtonElement>('.card').forEach(card => {
+      const match = (card.dataset.search || '').includes(query);
+      card.hidden = !match; if (match) visible++;
+    });
+    document.getElementById('librarySearchStatus')!.textContent = visible ? `Найдено: ${visible}` : 'Компании не найдены. Попробуйте другой запрос.';
+  });
 
   const grid = document.getElementById('libGrid') as HTMLElement;
   if (!grid) return;
   if (cores.length === 0) {
-    grid.innerHTML = `<div class="empty">Пока нет сохранённых компаний</div>`;
+    grid.innerHTML = `<div class="empty">Здесь будут ваши компании.<br />Нажмите «Новая компания», чтобы создать первую карточку.</div>`;
     return;
   }
   grid.innerHTML = cores
     .map((c: any) => {
-      const core = c.core || {};
+      const core = c.core || c;
       const brand = core.identity?.brandName || 'Без названия';
-      const country = core.identity?.country || '';
-      const scale = core.identity?.scale || '';
+      const country = core.inputs?.country || '';
+      const scale = core.inputs?.scale === 'small' ? 'Небольшая' : core.inputs?.scale === 'medium' ? 'Средняя' : '';
       const spec = core.business?.specialization || '';
       const ceo = core.people?.ceo?.name || '';
       const isActive = selectedCoreId === c.id ? 'active' : '';
       return `
-        <button class="card ${isActive}" data-id="${c.id}">
+        <button class="card ${isActive}" data-id="${escapeHtml(c.id)}" data-search="${escapeHtml([brand, spec, core.contacts?.city || ''].join(' ').toLocaleLowerCase())}">
           <div class="card-header">
             <div>
-              <h3 class="card-title">${brand}</h3>
-              <p class="card-sub">${spec}</p>
+              <h3 class="card-title">${escapeHtml(brand)}</h3>
+              <p class="card-sub">${escapeHtml(spec)}</p>
             </div>
           </div>
           <div class="pill-row">
-            ${country ? `<span class="pill">${country}</span>` : ''}
-            ${scale ? `<span class="pill">${scale}</span>` : ''}
-            ${ceo ? `<span class="pill">CEO: ${ceo}</span>` : ''}
+            <span class="pill">${core.meta?.approval && core.meta.approval.version === core.meta.version ? 'Утверждена' : 'Черновик'}</span>
+            ${country ? `<span class="pill">${escapeHtml(country)}</span>` : ''}
+            ${scale ? `<span class="pill">${escapeHtml(scale)}</span>` : ''}
+            ${ceo ? `<span class="pill">CEO: ${escapeHtml(ceo)}</span>` : ''}
           </div>
           <div class="card-meta">
-            <span>ID: ${c.id.slice(0, 12)}...</span>
-            <span>Создано: ${c.createdAt ? new Date(c.createdAt).toLocaleString('ru-RU') : ''}</span>
+            <span>${c.createdAt ? new Date(c.createdAt).toLocaleDateString('ru-RU') : ''}</span>
+            <span class="card-open">Открыть карточку →</span>
           </div>
         </button>
       `;
@@ -709,34 +876,12 @@ function renderLibrary() {
     .join('');
 
   grid.querySelectorAll('.card').forEach((card) => {
-    card.addEventListener('click', async () => {
-      selectedCoreId = (card as HTMLElement).dataset.id || null;
-      try {
-        const res = await fetch(`${API}/api/core/${selectedCoreId}`);
-        if (res.ok) {
-          const data = await res.json();
-          currentCoreData = data.core;
-        }
-      } catch {}
-      tabs.forEach((t) => {
-        t.classList.toggle('active', (t as HTMLElement).dataset.tab === 'company');
-      });
-      render('company');
-      setTimeout(() => {
-        if (currentCoreData) {
-          fillCoreEditor(currentCoreData);
-        }
-        const editStatus = document.getElementById('core-edit-status') as HTMLElement;
-        if (editStatus) {
-          editStatus.textContent = 'Карточка загружена для просмотра и редактирования';
-          editStatus.classList.remove('error');
-          editStatus.classList.add('success');
-        }
-        setGlobalStatus('Открыта карточка компании для редактирования', 'info');
-      }, 50);
+    card.addEventListener('click', () => {
+      const id = (card as HTMLElement).dataset.id;
+      if (id) navigate(`cards/${encodeURIComponent(id)}`);
     });
   });
 }
 
-loadCores();
-render('company');
+void loadCores();
+void renderRoute();

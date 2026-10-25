@@ -1,133 +1,110 @@
-# Architecture
+# Архитектура Makecom
 
-## 1. Goals
-- Meet all FR/NFR from requirements
-- Server-side only OpenRouter key management
-- Deterministic fact source (company card JSON) for site generation
-- Site versioning when card changes
-- Static site export (ZIP)
-- Extensible to 8 directions with shared facts
-- Minimal complexity
+Обновлено: 26.10.2026. Это описание действующего кода; планы обозначены отдельно. Запуск и схема для пользователя находятся в ../README.md. Очередь изменений — work-plan.md.
 
-## 2. Technology choices (proposed)
+## 1. Границы приложения
 
-| Component | Choice | Rationale | Alternatives considered | Notes |
-|-----------|--------|-----------|------------------------|-------|
-| Runtime/Backend | Node.js + TypeScript + Express | Available (v24), simple, good for REST API, easy to integrate with OpenRouter HTTP API | Python/FastAPI, Go (not installed) | Minimal deps; easy to secure key server-side |
-| Frontend | Vite + TypeScript | Fast dev, simple, can build static assets; easy to keep minimal | React/Vue/Svelte - more deps/complexity; vanilla fine for panel UI | Prefer simplest that meets needs |
-| Storage (cloud) | **Supabase Postgres (JSONB) + Supabase Storage** | Reliable for Render/Railway, free tier available, JSONB fits canonical model, Storage for ZIPs | Render Disk (limited), files only (ephemeral) | Primary for deployment |
-| Storage (local dev) | **File-based adapter** (JSON) | Easy local dev without external deps | SQLite | Swappable via storage interface |
-| Templating (site gen) | Handlebars/EJS or simple string templates | For 3 pages, RU/DE, styling options - simple templating sufficient | Static site generators (11ty) - possible but adds complexity | Keep minimal; generate static HTML/CSS/JS files |
-| ZIP export | `archiver` or `adm-zip` | Standard for packaging static site | Native zip if available | Upload to Storage or return to user |
-| Validation | Zod | Type-safe schema validation for CompanyCore and modules | Ajv/jsonschema | Good with TS |
+Личное приложение с общей библиотекой, без отдельных библиотек и ролей пользователей. Два основных действия: генерация CompanyCore, затем генерация сайта по утверждённому снимку карточки. OpenRouter нужен для реальной генерации; Supabase/Render для локальной работы не нужны.
 
-**Sources checked:** Node.js docs (general), Express docs patterns. No specific version constraints given in scope - use current compatible versions.
+Стек: TypeScript, Express 5, Vite, Zod, sanitize-html, PostCSS, JSZip/file-saver. Отдельной серверной очереди/воркера нет: POST генерации ожидает результат, интерфейс параллельно опрашивает журнал операции.
 
-## 3. High-level architecture
-```mermaid
-graph TB
-    UI[Web Panel UI] --> API[Express API Server]
-    API --> OR[OpenRouter API]
-    API --> Core[CompanyCore Service]
-    Core --> Store[Storage Adapter]
-    Store --> DB[(Supabase Postgres JSONB)]
-    Store --> St[(Supabase Storage)]
-    Store --> FS[(Local FS adapter)]
-    API --> Gen[Generators]
-    Gen --> Tmpl[Template Engine]
-    Gen --> Val[Validators/Checks]
-    API --> Export[ZIP Exporter]
-```
+## 2. Где находится код
 
-### Components
-- **API Server (server/):** Routes for company generation, site generation, library, config. Holds OpenRouter key in env/server config only.
-- **Generators (server/generators/):** Company generator (calls OpenRouter with prompts), site generator (uses card facts + templates).
-- **Validators (server/validators/):** FR-008 checks - cross-page consistency, phone/country, contradictions, i18n meaning, required fields, diversity.
-- **Templates (server/templates/ or templates/):** HTML templates for 3 pages, RU/DE variants or i18n, styling/themes.
-- **Storage (server/storage/):** CRUD for companies/sites/versions, JSON schema enforcement.
-- **Frontend (client/):** Two-phase UI (A: company, B: site), library, preview, downloads.
+| Путь | Ответственность |
+|---|---|
+| client/index.html, src/workspace.css | Каркас и оформление панели |
+| client/src/main.ts | Hash-навигация, формы, библиотека, редактор и API-вызовы |
+| client/src/editor-view.ts | Разметка разделов карточки |
+| client/src/company-inputs.ts | Каталог, ручные и случайные параметры |
+| client/src/generation-operations.ts | Бюджет, прогресс, история и квота |
+| client/src/site-preview.ts | Превью HTML/CSS в sandbox iframe, страницы и мобильная ширина |
+| client/vite.config.ts | Dev proxy /api и /health; сохраняет Host, changeOrigin=false |
+| server/src/index.ts | Загрузка env, HTTP-сервер, защита API, маршруты и раздача client/dist |
+| server/src/config/env.ts | Конфигурация, требования к production-секретам |
+| server/src/routes/core.ts | Создание/список/чтение/правка/утверждение/JSON компании, каталог |
+| server/src/routes/site.ts | Создание версии сайта и чтение версий компании |
+| server/src/routes/session.ts | Шифрование ключа в cookie, проверка наличия/удаление сессии |
+| server/src/routes/operations.ts | История, стадия, лимит приложения и безопасный запрос квоты ключа |
+| server/src/routes/models.ts, health.ts | Публичный каталог моделей через сервер и health endpoint |
+| server/src/core/* | Типы карточки, атомарные факты, копии/хеши, редактирование и утверждение |
+| server/src/generators/company-prompt.ts, company-contract.ts, company-catalog.ts | Инструкция/контекст генерации, исходящий JSON-контракт и каталог параметров |
+| server/src/generators/ai-site-generator.ts | Контракт запроса сайта, переводы/HTML/CSS и сборка безопасных файлов |
+| server/src/generators/site-generator.ts | Явный mock-шаблон; не fallback реальной генерации |
+| server/src/services/openrouter.ts | Запросы модели/каталога, оценка цены, лимит, попытки, таймауты |
+| server/src/services/operations.ts | Журнал операций и жизненный цикл |
+| server/src/http-proxy.ts | Прямой HTTPS, опциональный прокси только для OpenRouter |
+| server/src/storage/* | IStorage, FileAdapter, SupabaseAdapter |
+| server/src/validators/*, modules/* | Технические схемы и заготовки расширений; часть старых валидаторов будет убрана при чистке |
+| supabase/migrations, render.yaml | Необязательная подготовка облачного запуска; live-проверки впереди |
 
-## 4. Canonical Company Model (CompanyCore)
+## 3. Создание компании
 
-`CompanyCore` is the **single source of truth** for all generation. All modules read from it, none regenerate core facts.
+1. Форма выбирает страну, масштаб, бренд, направление, сервис и модель. Каталог содержит будущие варианты, но генерировать можно только DE/small/medium.
+2. POST /api/core/create разбирает вход, получает временный ключ из cookie и создаёт запись операции до обращения к модели.
+3. Инструкция содержит схему, точный бренд, правила согласованности истории/команды/продукта/FAQ, привязку телефона к городу и разнообразие относительно контекста предыдущих карточек. Требования задаются до запроса.
+4. OpenRouterService проверяет тариф/бюджет, отправляет запрос и сохраняет сведения об ответе/расходах.
+5. Сервер технически разбирает JSON и схему, назначает UUID/время, собирает facts, сохраняет карточку. Отдельного смыслового оценщика после ответа быть не должно.
+6. Сохранение не означает автоматическое утверждение. Пользователь проверяет карточку в редакторе.
 
-```json
-{
-  "id": "uuid",
-  "createdAt": "ISO8601",
-  "updatedAt": "ISO8601",
-  "inputs": { "brandName": "...", "country": "DE", "businessDirection": "...", "b2bServiceType": "...", "scale": "small|medium", "model": "..." },
-  "identity": { "brandName": "...", "legalEntityName": "..." },
-  "contacts": { "city": "...", "address": "...", "phone": "...", "email": "..." },
-  "people": { "ceo": {"name": "...", "title": "...", "bio": "..."}, "heads": [{"name": "...", "title": "...", "bio": "..."}, {"name": "...", "title": "...", "bio": "..."}] },
-  "business": { "history": "...", "specialization": "...", "targetAudience": "...", "clientProblem": "..." },
-  "product": { "inputs": "...", "process": "...", "result": "...", "limits": "..." },
-  "faq": [{"q": "...", "a": "..."}, {"q": "...", "a": "..."}, {"q": "...", "a": "..."}, {"q": "...", "a": "..."}, {"q": "...", "a": "..."}],
-  "facts": { "factId": { "key": "...", "value": "...", "source": "core" } },
-  "extensions": {},
-  "meta": { "version": 1 }
-}
-```
+До запроса извлекаются до восьми последних компаний с теми же страной и масштабом: краткие история/ниша/аудитория/продукт/FAQ/опыт команды. Ключи, операции и extensions в этот контекст не входят. company-contract.ts передаёт провайдеру JSON Schema с точным брендом, двумя heads и пятью Q/A. Обе формы выбирают текстовые модели с structured_outputs. Промпт уменьшает вероятность ошибок, но не гарантирует фактическую достоверность или различие компаний.
 
-### Fact Registry
-Atoms facts (e.g. `legalEntityName`, `registeredAddress`, `contactPhone`) stored for cross-module validation.
+## 4. Правки и утверждение
 
-### Module contract
-- Modules may only read allowed fields from `CompanyCore`
-- Must not regenerate `identity`, `contacts`, `people`
-- Can add module-specific computed text/blocks
-- Must store `snapshotHash` of `CompanyCore` at generation time
+PUT /api/core/:id принимает только редактируемые поля, expectedVersion и подтверждение ручной проверки. edit-core.ts проверяет структуру/пустые поля/формат телефона, не позволяет менять id/meta напрямую, увеличивает версию, пересобирает facts и снимает approval.
 
-### Storage schema (Supabase)
-- `companies_core` (id, core jsonb, facts jsonb, inputs jsonb, status, created_at, updated_at)
-- `site_versions` (id, core_id, lang, style, storage_path, created_at)
-- `company_modules` (id, core_id, module_key, payload jsonb, snapshot_hash, created_at) - for future 8 directions
+POST /api/core/:id/approve утверждает текущую сохранённую версию. meta.approval содержит version и approvedAt; версия содержания не увеличивается. Для сохранения и утверждения действует общая блокировка карточки в текущем процессе. Старые карточки без approval считаются черновиками. Это ручная проверка, не автоматический вывод модели о корректности.
 
-## 5. Site structure and versioning
-- Site generated from approved company card snapshot (facts frozen at generation time)
-- Each generation creates new site version linked to companyId; old versions preserved
-- Output: static files (HTML/CSS/JS/assets) packaged as ZIP
-- No forms/server processing - static only
-- nav, headings, metadata, favicon required
+GET /api/core/:id/export возвращает очищенный контракт CompanyCore: неизвестные поля убраны, facts пересобраны, extensions пустой. JSON не содержит запрос/ключ/cookie/журнал. Экспорт черновика разрешён.
 
-## 6. OpenRouter integration (security)
-- API key read from server env/config only (e.g., `OPENROUTER_API_KEY`)
-- Never sent to client, never written to generated site files, never logged
-- **Model list:** Server proxies `GET https://openrouter.ai/api/v1/models`, caches 10-30 min, returns only `id/name/pricing/context_length` to client
-- **Selection:** UI search/filter; whitelist fallback if API unavailable
-- **Spend limit:** `OPENROUTER_SPEND_LIMIT_PER_OP_USD` in server config. Estimate cost before request using cached pricing; block if over limit. Track actual usage from response if available
-- **Resiliency:** Error handling, limited retries (configurable)
-- Saved results load without API calls
-- All requests go through server proxy only
+## 5. Создание сайта
 
-## 7. Consistency & diversity
-- Single source of truth = `CompanyCore` (canonical)
-- **Core snapshot** used for generation (immutable for that operation)
-- **Cross-module validator** + **Joint validation** for multi-module sets
-- **Fact Registry** ensures same facts used everywhere
-- **Module contract** prevents core fact regeneration
-- **Diversity:** vary history/specialization/team bios/target audience/product/FAQ - not just names/numbers
-- Phone format should match country (DE patterns) - validate
-- i18n: generate in RU/DE preserving meaning, facts unchanged
+POST /api/site/generate читает сохранённую карточку и отклоняет черновик до обращения к модели. CompanyCoreService создаёт глубокую копию и SHA-256 снимка. Запрос получает этот снимок, целевой RU/DE и пожелания к оформлению.
 
-## 8. Extensibility (8 directions)
-- Common fact store (company card) shared
-- Modular generators/validators per direction
-- Joint validation of final set
-- Schema supports extension without breaking existing
+Контракт ответа: translations (по ключам текстовых полей), pages (index.html/product.html/company.html как HTML-фрагменты), css. Имена, юрлицо, контакты и подписи передаются модели как доступные токены; сервер подставляет значения из снимка с экранированием.
 
-## 9. Risks & mitigations
-| Risk | Impact | Mitigation |
-|------|--------|-----------|
-| Stack unclear | Med | Chose minimal proven stack with justification |
-| Key leakage | High | Server-only, env config, no client exposure, audit exports |
-| Fact drift | High | Snapshot card at site gen, versioning, validators |
-| Non-diverse companies | Med | Diversity checks, varied prompts, validation |
-| Cost overrun | Med | Spend limit per operation, cost tracking |
-| i18n meaning loss | Med | Facts frozen, translation carefully controlled |
+До запроса задаются: обязательные блоки страниц и преимущества на основе продукта, навигация, иерархия заголовков, мобильный CSS, сохранение смысла/чисел/ограничений, отсутствие выдуманных функций. Последующего смыслового оценщика и исправляющего LLM-вызова нет.
 
-## 10. Sources
-- OpenRouter API docs (general patterns) - to be verified during impl; key handling best practices
-- Express.js docs
-- Vite docs
-- No specific constraints found in scope requiring different stack
+После ответа остаётся техническая сборка: JSON/контракт, подстановка известных токенов, очистка HTML/CSS и упаковка документов с lang, metadata, CSP, stylesheet и favicon. Непригодный формат может завершить операцию ошибкой; это не бизнес-оценка содержания.
+
+В реальном режиме ошибка не подменяется шаблонным сайтом. Только MOCK_LLM=true включает тестовый генератор. Версия хранит snapshot/files/model/cost и доступна без повторного запроса. Старые метаданные без files не позволяют восстановить утраченное HTML.
+
+## 6. Безопасность и расходы
+
+Ключ вводится в UI. routes/session.ts шифрует его AES-256-GCM в session cookie makecom_openrouter (HttpOnly, SameSite=Strict, Path=/api; Secure в production). Сервер расшифровывает ключ временно для запроса; постоянной записи в файлы/БД/env нет. SESSION_SECRET — отдельный секрет приложения. API/статус сессии не возвращает ключ.
+
+В production Basic auth защищает личную библиотеку; health открыт. Same-origin guard проверяет Origin/Sec-Fetch-Site. В dev Vite сохраняет браузерный Host, чтобы проверка не блокировала разрешённые запросы.
+
+OpenRouterService кэширует каталог, оценивает вход/максимальный выход и ограничивает тарифы provider.max_price. Бюджет формы не превышает серверный максимум. Неизвестная стоимость предыдущей попытки резервирует оценочный бюджет. Число попыток ограничено; учитывается Retry-After, длинное ожидание прекращает повторы; 429 без интервала не зацикливается.
+
+Журнал хранит только метаданные: модель, стадии, попытки, токены, confirmed/estimated/unknown стоимость. Списание записывается до разбора результата. После перезапуска незавершённая операция читается как interrupted; автоматического повторного запроса нет. Неизвестные списания сверяются вручную с OpenRouter Activity. Прикладная оценка не гарантирует окончательный биллинг провайдера.
+
+Страница подключения после сохранения ключа и при открытии существующей сессии вызывает /api/operations/quota. Сервер обращается к OpenRouter /api/v1/key и возвращает только числовые лимиты/расходы, разрешённый период сброса и бесплатную квоту. Отсутствующий лимит отличается от неизвестного значения и нуля; это не баланс всего аккаунта. Сведения не сохраняются в БД/файлы, API отвечает no-store. При отключении/новом запросе устаревшие UI-запросы отменяются.
+
+HTML не исполняет скрипты; запрещённые теги/атрибуты удаляются. PostCSS удаляет импорты, сетевые URL и опасные конструкции. Превью использует iframe без allow-scripts и ограниченный CSP. Эти меры не заменяются промптом.
+
+## 7. Данные и адаптеры
+
+IStorage определяет компании, сайты, результаты модулей и операции. FileAdapter сохраняет JSON в DATA_DIR/{companies,site-versions,modules,operations}; карточки/журнал записываются через временный файл и rename. Относительный DATA_DIR зависит от рабочего каталога процесса.
+
+SupabaseAdapter использует companies_core/core JSONB, site_versions/version JSONB, company_modules/result JSONB, generation_operations/operation JSONB; файлы сайта — приватный bucket и immutable version-id/files.json. При ошибке вставки метаданных новый bundle удаляется. Миграции 001 и 002 подготовлены; фактическое облако ещё не проверено.
+
+**Локальной SQL-БД пока нет.** На этапе 4 нужен независимый адаптер БД, явный перенос существующих файлов, тест CRUD/версий/операций после перезапуска. Предполагается SQLite; библиотека и миграции выбираются при реализации. Supabase остаётся альтернативой, не условием запуска. Текущее развёртывание рассчитано на один процесс; per-process блокировка не является распределённой транзакцией.
+
+## 8. Расширение и ограничения
+
+CompanyCore, FactRegistry, CoreSnapshot и CompanyModuleResult образуют основу восьми будущих направлений из ТЗ. Полные модули ещё не реализованы. Новые запросы получают один утверждённый снимок; не генерируют идентичность/контакты повторно. Старые CrossModuleValidator/JointValidator не доказывают смысловую согласованность, часть методов — заготовки; не развивать их в последующие смысловые проверки.
+
+Общий генерационный контракт будущего модуля: вход — ModuleContext.snapshot и язык; до запроса — неизменяемые facts, область разрешённых новых блоков, форма JSON результата и запрет домысливать отсутствующие сведения; выход — moduleKey/payload/snapshotHash. При отсутствии исходных данных модуль должен сообщить об отсутствии, а не выдумывать клиентов, юридические основания или сертификаты. Отдельного оценщика после ответа нет; формат/безопасность и целостность сохранения проверяются технически.
+
+| Направление | Что получает в запросе |
+|---|---|
+| Оператор, история, команда | identity/business/people одного снимка |
+| Юридические документы | Точное юрлицо/адрес и предоставленные пользователем основания; не утверждать непроверенную юридическую действительность |
+| Страновые реквизиты | Страна и явно предоставленные реквизиты; не выдумывать реестровую проверку |
+| Контакты | Только contacts снимка |
+| Продукт, сценарии, FAQ | product/business/faq и реальные ограничения |
+| Персональные данные и политики | Фактически реализованные формы/операции, не обещания отсутствующего сервера |
+| Безопасность | Только сведения о реализованных мерах, без выдуманных сертификаций |
+| Клиенты, отзывы, кейсы, публикации | Только явно предоставленные материалы; пустой источник не заменять фиктивными отзывами |
+
+Проверка итогового комплекта по ТЗ выполняется как пользовательская приёмка по чек-листу. Первый реальный RU-результат просмотрен, найдено дополнение FAQ вместо переноса заглушки; в запрос добавлен явный запрет такого исправления. Два готовых комплекта примеров, завершение реальной приёмки RU/DE, локальная БД, финальная чистка и облачный запуск ещё впереди.

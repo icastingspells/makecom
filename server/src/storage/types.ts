@@ -1,3 +1,4 @@
+import type { GenerationOperation } from '../services/operations.js';
 import { CompanyCore, CoreSnapshot } from '../core/types.js';
 
 export interface SiteVersion {
@@ -7,6 +8,9 @@ export interface SiteVersion {
   style: string;
   storagePath: string;
   createdAt: string;
+  snapshot?: CoreSnapshot;
+  files?: Record<string, string>;
+  generation?: { kind: 'ai' | 'mock'; model: string; costUsd?: number; translationReviewRequired: boolean };
 }
 
 export interface CompanyModuleResult {
@@ -23,6 +27,10 @@ export interface CompanyModuleResult {
  * Позволяет переключаться между file и supabase без изменения бизнес-логики
  */
 export interface IStorage {
+  saveOperation(operation: GenerationOperation): Promise<void>;
+  getOperation(id: string): Promise<GenerationOperation | null>;
+  listOperations(): Promise<GenerationOperation[]>;
+
   // CompanyCore
   saveCore(core: CompanyCore): Promise<CompanyCore>;
   getCore(id: string): Promise<CompanyCore | null>;

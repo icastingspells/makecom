@@ -12,7 +12,10 @@ router.get('/', async (_req, res) => {
       id: m.id,
       name: m.name,
       pricing: m.pricing,
-      context_length: m.context_length
+      context_length: m.context_length,
+      supported_parameters: m.supported_parameters,
+      output_modalities: m.output_modalities,
+      max_completion_tokens: m.max_completion_tokens
     }));
     res.json({ models: safe });
   } catch (err: any) {

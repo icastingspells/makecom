@@ -3,11 +3,23 @@ dist
 build
 .env
 .env.local
+.env.bak
 data
 *.log
+*.err
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 .DS_Store
 coverage
 .vscode
 .idea
 *.zip
 examples
+
+# Local proxy tooling (contains credentials in config)
+singbox/
+*.exe
+
+# Local helper scripts with embedded keys
+start-test.cmd

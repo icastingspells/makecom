@@ -1,7 +1,9 @@
+import type { GenerationOperation } from '../services/operations.js';
 import { IStorage, SiteVersion, CompanyModuleResult } from './types.js';
 import { CompanyCore } from '../core/types.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { randomUUID } from 'crypto';
 
 /**
  * Файловый адаптер для локальной разработки
@@ -22,11 +24,39 @@ export class FileAdapter implements IStorage {
     }
   }
 
+  async saveOperation(operation: GenerationOperation): Promise<void> {
+    const dir = path.join(this.dataDir, 'operations');
+    await fs.mkdir(dir, { recursive: true });
+    const target = path.join(dir, operation.id + '.json');
+    const temporary = target + '.' + randomUUID() + '.tmp';
+    try {
+      await fs.writeFile(temporary, JSON.stringify(operation), 'utf8');
+      await fs.rename(temporary, target);
+    } finally { await fs.unlink(temporary).catch(() => {}); }
+  }
+  async getOperation(id: string): Promise<GenerationOperation | null> {
+    try { return JSON.parse(await fs.readFile(path.join(this.dataDir, 'operations', id + '.json'), 'utf8')); }
+    catch (error: any) { if (error.code === 'ENOENT') return null; throw error; }
+  }
+  async listOperations(): Promise<GenerationOperation[]> {
+    const dir = path.join(this.dataDir, 'operations');
+    await fs.mkdir(dir, { recursive: true });
+    const names = (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
+    const records = await Promise.all(names.map(name => this.getOperation(name.slice(0, -5))));
+    return records.filter((record): record is GenerationOperation => !!record).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   async saveCore(core: CompanyCore): Promise<CompanyCore> {
     const dir = path.join(this.dataDir, 'companies');
     await this.ensureDir(dir);
     const filePath = path.join(dir, `${core.id}.json`);
-    await fs.writeFile(filePath, JSON.stringify(core, null, 2), 'utf-8');
+    const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporaryPath, JSON.stringify(core, null, 2), 'utf-8');
+      await fs.rename(temporaryPath, filePath);
+    } finally {
+      await fs.unlink(temporaryPath).catch(() => {});
+    }
     return core;
   }
 
