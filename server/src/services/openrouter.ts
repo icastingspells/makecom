@@ -117,14 +117,16 @@ export class OpenRouterService {
     }
 
     // Реальный запрос к OpenRouter (только с серверной стороны)
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'X-Title': 'makecom'
+    };
+
+    // Не отправляем HTTP-Referer вообще для локального теста
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': env.APP_BASE_URL,
-        'X-Title': 'makecom'
-      },
+      headers,
       body: JSON.stringify(req)
     });
 

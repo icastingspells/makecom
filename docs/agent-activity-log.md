@@ -65,19 +65,21 @@
 ## 013 | STAGE4 | Infra
 - **Stage:** Stage 4
 - **Action:** modules/contracts, config/env, services/openrouter
-- **Result:** Ready for real calls
+- **Result:** Infra ready
 
-## 014 | STAGE5 | Routes+UI scaffold
+## 014 | STAGE5 | Routes+UI
 - **Stage:** Stage 5
-- **Action:** Routes and minimal UI
-- **Result:** Infra testable
+- **Action:** Routes, UI for company generation
+- **Result:** Testable
 
-## 015 | REAL_FUNCTIONALITY | Start company generation via LLM
+## 015 | OPENROUTER_ISSUE | Key blocked
+- **Stage:** Debug
+- **Action:** Tested provided key with various headers/models - all return 403 Access denied by security policy
+- **Result:** Key unusable, switched back to MOCK_LLM=true
+- **Next step:** Site generator from snapshot
+
+## 016 | SITE_GEN | Start site generator
 - **Stage:** Implementation
-- **Action:** Starting real company generation endpoint with strict prompt for CompanyCoreSchema, validation, fact-registry, save via storage
-- **Goal:** Replace test core creation with actual LLM generation
-- **Files/commands/sources:** docs/requirements.md (FR-001, FR-002), docs/architecture.md, server/src/validators/core-schema.ts
-- **Result:** In progress
-- **Checks:** Must use server proxy only, validate with Zod, build CompanyCore, create snapshot
-- **Issues/decisions:** Build strict prompt, parse JSON safely, return errors clearly
-- **Next step:** Create generator + route + UI form
+- **Action:** Starting site generator from CoreSnapshot, templates for 3 pages, RU/DE, versioning, ZIP export
+- **Goal:** Phase B working from saved CompanyCore
+- **Next step:** Create templates and generator
