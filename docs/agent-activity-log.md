@@ -240,3 +240,10 @@ Historical references to removed documentation paths in older entries are preser
 - Audited scope sections 1-7, updated checklist and README with compact readiness table. Original scope already tracked in origin/dev and remains unchanged.
 - Remaining: two packaged verified example sets, independent complete live-content review and real Render/Supabase verification. No paid generations/deployment.
 - Final verification: 63 tests in 16 files, both workspace typechecks, production build and diff whitespace check passed. Original scope SHA-256 unchanged.
+
+
+## 2026-10-26 | RELEASE | Promote to main
+- User authorized README cleanup and promotion of the complete dev history to main.
+- README now contains project features, usage, architecture, data schema and deployment instructions; removed development stages, readiness report and GitHub preparation history.
+- Documentation-only change; verified README links and diff. Previous code verification: 63 tests, typecheck and build passed.
+- Promotion uses fast-forward to preserve every commit; no deployment requested.
