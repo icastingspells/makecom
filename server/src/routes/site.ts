@@ -41,7 +41,8 @@ router.post('/generate', async (req, res) => {
 
     res.json({
       version: result.version,
-      files: Object.keys(result.files),
+      files: result.files,
+      fileList: Object.keys(result.files),
       snapshotHash: snapshot.hash
     });
   } catch (err: any) {
