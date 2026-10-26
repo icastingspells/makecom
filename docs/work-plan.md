@@ -46,3 +46,5 @@ SQLite: Node.js 24.15+, STORAGE_DRIVER=sqlite, DATABASE_PATH или DATA_DIR/mak
 Актуальное решение: пользователь разрешил перенос dev в main и публикацию main. README очищен от этапов и истории подготовки; инструкции Render используют main. Последняя проверка кода: 63 теста / 16 файлов, типы и сборка успешны. Следующий шаг после публикации — примеры и облачный запуск по отдельному поручению.
 
 README now includes a feature readiness table and a schema-validated illustrative CompanyCore JSON. No application code changed; remaining work is unchanged.
+
+Historical singbox files were removed with user authorization; all 17 prior commits preserved and main/dev updated. Commit IDs changed again; the pre-cleanup IDs in historical log entries are archival references. Current application files remain unchanged. No cloud configuration changed.

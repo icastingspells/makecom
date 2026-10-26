@@ -259,3 +259,10 @@ Historical references to removed documentation paths in older entries are preser
 - Added a compact feature readiness table to README with explicit partial and missing capabilities, without development-stage history.
 - Added an illustrative valid JSON CompanyCore matching the current Zod schema: two heads, five FAQ, facts and version approval.
 - Documentation-only change; validated embedded JSON against compiled CompanyCoreSchema and checked links/whitespace.
+
+
+## 2026-10-26 | SECURITY | Remove historical local proxy files
+- User confirmed removal of historical singbox files. Removed singbox/ and sing-box.zip from all commit history; retained optional application proxy support.
+- Preserved all 17 prior commits, author/committer identities, dates and messages; current HEAD tree unchanged. Included the latest remote README edit before rewriting.
+- Updated main/dev atomically with exact force-with-lease checks, expired local reflogs and pruned obsolete objects. Re-scanned remaining small blobs for the historical proxy UUID/server identifiers: zero matches.
+- Previously exposed proxy credentials should be rotated independently; history cleanup does not revoke credentials or purge third-party clones/caches.
